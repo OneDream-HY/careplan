@@ -3510,20 +3510,25 @@ function renderSavedClients() {
     return;
   }
   function _esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  function _shortDate(t) {
+    if (!t) return '—';
+    const d = new Date(t);
+    return d.toLocaleString(undefined, { day:'numeric', month:'short', hour:'2-digit', minute:'2-digit' });
+  }
+  function _shortName(s) {
+    // Strip email domain so "hayley@reachfortraining.com.au" -> "hayley", "Catherine Kim" stays as is.
+    if (!s) return '';
+    return String(s).split('@')[0].split('.').join(' ');
+  }
   root.innerHTML = '<h3>Resume a client (' + list.length + ')</h3>' + list.map(c => {
-    const dt = c.lastSaved ? new Date(c.lastSaved) : null;
-    const when = dt ? dt.toLocaleString(undefined, {dateStyle:'medium', timeStyle:'short'}) : '—';
-    const cdt = c.createdAt ? new Date(c.createdAt) : null;
-    const cwhen = cdt ? cdt.toLocaleString(undefined, {dateStyle:'medium', timeStyle:'short'}) : '—';
-    const startedBy = c.createdBy || '';
-    const lastBy = c.lastModifiedBy || '';
     const safe = _esc(c.name || '(unnamed)');
-    let meta = '<small>Last saved: ' + _esc(when);
-    if (lastBy) meta += ' · by <strong>' + _esc(lastBy) + '</strong>';
-    meta += '</small>';
-    if (startedBy) meta += '<small style="margin-top:0">Started: ' + _esc(cwhen) + ' · by <strong>' + _esc(startedBy) + '</strong></small>';
+    const startedBy = _shortName(c.createdBy || '');
+    const lastBy = _shortName(c.lastModifiedBy || '');
+    let meta = 'Saved ' + _esc(_shortDate(c.lastSaved));
+    if (lastBy) meta += ' · ' + _esc(lastBy);
+    if (startedBy && startedBy !== lastBy) meta += '  ·  Started by ' + _esc(startedBy);
     return `<div class="saved-row" data-cid="${c.id}">
-      <div class="sr-meta"><strong>${safe}</strong>${meta}</div>
+      <div class="sr-meta"><strong>${safe}</strong><small>${meta}</small></div>
       <span class="sr-mode ${c.mode==='annual'?'annual':''}">${c.mode === 'annual' ? 'Annual Review' : 'New Client'}</span>
       <button type="button" data-resume="${c.id}">Resume →</button>
       <button type="button" data-delete="${c.id}" title="Delete this saved client">✕</button>
