@@ -135,14 +135,18 @@ window.ODC_CLOUD = (function() {
     options = options || {};
     const token = await getToken();
     const url = path.startsWith('http') ? path : 'https://graph.microsoft.com/v1.0' + path;
+    // Binary uploads (Blob, ArrayBuffer) are sent raw with caller-provided Content-Type.
+    // Plain objects/strings are JSON-stringified with the default JSON Content-Type.
+    const isBinary = options.body instanceof Blob || options.body instanceof ArrayBuffer;
+    const baseHeaders = isBinary
+      ? { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' }
+      : { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json', 'Accept': 'application/json' };
+    const body = options.body == null ? undefined :
+                 (isBinary ? options.body : JSON.stringify(options.body));
     const r = await fetch(url, {
       method: options.method || 'GET',
-      headers: Object.assign({
-        'Authorization': 'Bearer ' + token,
-        'Content-Type':  'application/json',
-        'Accept':        'application/json'
-      }, options.headers || {}),
-      body: options.body ? JSON.stringify(options.body) : undefined
+      headers: Object.assign(baseHeaders, options.headers || {}),
+      body: body
     });
     if (!r.ok) {
       const txt = await r.text();
@@ -4128,9 +4132,11 @@ function executeQuickPdf() {
 }
 document.getElementById('btnQuickPdf').addEventListener('click', executeQuickPdf);
 
-/* Email coordinator — opens user's email client with To/Subject/Body prefilled.
-   Per-client coordinator email is remembered in state.data.coordinator_email. */
-function executeEmailCoordinator() {
+/* Email coordinator — generates PDF, uploads to SharePoint, gets a sharing link,
+   then opens the user's email client with the link in the body.
+   Per-client coordinator email is remembered in state.data.coordinator_email.
+   Falls back to "open mailto + manual attach" if PDF generation fails. */
+async function executeEmailCoordinator() {
   if (!state.mode) { alert('Open a client first.'); return; }
 
   // Get / prompt for coordinator email (stored per-client)
@@ -4152,37 +4158,123 @@ function executeEmailCoordinator() {
     autoSave();
   }
 
-  // Compose email
   const clientName = (state.data.p_name || '').trim() || '(unnamed client)';
-  const dateStr = new Date().toLocaleDateString(undefined, { day:'numeric', month:'long', year:'numeric' });
+  const dateLabel = new Date().toLocaleDateString(undefined, { day:'numeric', month:'long', year:'numeric' });
+  const subject = 'Care Plan — ' + clientName + ' (' + dateLabel + ')';
   const me = (typeof ODC_CLOUD !== 'undefined' && ODC_CLOUD.getUser && ODC_CLOUD.getUser()) || {};
   const fromName = me.name || me.email || 'ODC Care Team';
-  const subject = 'Care Plan — ' + clientName + ' (' + dateStr + ')';
-  const body =
-    'Hi,\n\n' +
-    'Please find the latest Care Plan for ' + clientName + ' attached.\n\n' +
-    'Summary:\n' +
-    '  • Mode: ' + (state.mode === 'annual' ? 'Annual Review' : 'New Client / Care Plan') + '\n' +
-    '  • DOB: ' + (state.data.p_dob || '—') + '\n' +
-    '  • Diagnosis: ' + (state.data.med_diagnosis || '—') + '\n' +
-    '  • Allergies: ' + (state.data.med_allergies || '—') + '\n\n' +
-    'Note: please attach the PDF (downloaded just now to your Downloads folder) before sending.\n\n' +
-    'Kind regards,\n' +
-    fromName + '\n' +
-    'One Dream Community';
 
-  const mailtoUrl = 'mailto:' + encodeURIComponent(toEmail) +
-                    '?subject=' + encodeURIComponent(subject) +
-                    '&body=' + encodeURIComponent(body);
+  if (!confirm('This will:\n\n' +
+               '  1. Generate the PDF\n' +
+               '  2. Upload it to SharePoint (CarePlan PDFs folder)\n' +
+               '  3. Create a secure share link\n' +
+               '  4. Open your email with the link prefilled\n\n' +
+               'To: ' + toEmail + '\nSubject: ' + subject + '\n\n' +
+               'Continue?')) return;
 
-  // Trigger PDF download FIRST so it lands in Downloads, then open the email
-  if (confirm('Download the PDF now and open your email app?\n\n' +
-              'To: ' + toEmail + '\n' +
-              'Subject: ' + subject + '\n\n' +
-              'After saving the PDF, your email will open with the message prefilled — just attach the downloaded PDF and send.')) {
-    executeQuickPdf();
-    // Open mailto after the print dialog (user closes it first)
-    setTimeout(() => { window.location.href = mailtoUrl; }, 1500);
+  const btn = document.getElementById('btnEmailCoord');
+  const orig = btn.textContent;
+  btn.disabled = true;
+
+  try {
+    if (typeof html2pdf === 'undefined') throw new Error('PDF library not loaded yet — please wait a moment and retry.');
+
+    // === 1. Generate PDF as Blob ===
+    btn.textContent = '⏳ Generating PDF…';
+    if (state.currentStep !== 'careplan') renderCarePlan();
+    const items = buildPrintItems();
+    if (items.length === 0) throw new Error('Nothing to export yet — fill in the assessment first.');
+
+    document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
+    items.forEach(it => { if (it.target) it.target.classList.add('print-include'); });
+    document.querySelectorAll('.step-panel').forEach(p => p.classList.add('active'));
+    document.body.classList.add('print-filter');
+    document.body.classList.add('pdf-export');
+
+    await new Promise(r => setTimeout(r, 150)); // let layout settle
+
+    let pdfBlob;
+    try {
+      pdfBlob = await html2pdf()
+        .set({
+          margin: [10, 10, 10, 10],
+          image:  { type: 'jpeg', quality: 0.92 },
+          html2canvas: { scale: 1.6, useCORS: true, logging: false, scrollX: 0, scrollY: 0 },
+          jsPDF:  { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
+          pagebreak: { mode: ['css', 'legacy'] }
+        })
+        .from(document.getElementById('appMain'))
+        .toPdf()
+        .output('blob');
+    } finally {
+      document.body.classList.remove('print-filter');
+      document.body.classList.remove('pdf-export');
+      document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
+      document.querySelectorAll('.step-panel').forEach(p => p.classList.toggle('active', p.dataset.step === state.currentStep));
+    }
+
+    // === 2. Upload PDF to SharePoint ===
+    btn.textContent = '⏳ Uploading to SharePoint…';
+    const safeName = clientName.replace(/[^a-zA-Z0-9가-힣]+/g, '_').replace(/^_|_$/g, '') || 'client';
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const filename = 'ODC_CarePlan_' + safeName + '_' + ts + '.pdf';
+    const folder = 'CarePlan PDFs';
+    const siteId = ODC_CLOUD.siteId || await ODC_CLOUD.resolveSite();
+
+    const uploadPath = '/sites/' + siteId + '/drive/root:/' + encodeURIComponent(folder) + '/' + encodeURIComponent(filename) + ':/content';
+    const uploaded = await ODC_CLOUD.graph(uploadPath, {
+      method: 'PUT',
+      body: pdfBlob,
+      headers: { 'Content-Type': 'application/pdf' }
+    });
+    const fileId = uploaded.id;
+
+    // === 3. Get sharing link (organisation-scoped, view-only) ===
+    btn.textContent = '⏳ Creating share link…';
+    const linkResp = await ODC_CLOUD.graph(
+      '/sites/' + siteId + '/drive/items/' + fileId + '/createLink',
+      { method: 'POST', body: { type: 'view', scope: 'organization' } }
+    );
+    const shareUrl = (linkResp && linkResp.link && linkResp.link.webUrl) || uploaded.webUrl;
+    if (!shareUrl) throw new Error('Could not obtain a share link.');
+
+    // === 4. Open mailto with the link ===
+    const body =
+      'Hi,\n\n' +
+      'The latest Care Plan for ' + clientName + ' is ready. View / download it here (ODC sign-in required):\n\n' +
+      shareUrl + '\n\n' +
+      'Summary:\n' +
+      '  • Mode: ' + (state.mode === 'annual' ? 'Annual Review' : 'New Client / Care Plan') + '\n' +
+      '  • DOB: ' + (state.data.p_dob || '—') + '\n' +
+      '  • Diagnosis: ' + (state.data.med_diagnosis || '—') + '\n' +
+      '  • Allergies: ' + (state.data.med_allergies || '—') + '\n\n' +
+      'The file lives in the SharePoint "CarePlan PDFs" folder for audit / re-download.\n\n' +
+      'Kind regards,\n' +
+      fromName + '\n' +
+      'One Dream Community';
+
+    const mailtoUrl = 'mailto:' + encodeURIComponent(toEmail) +
+                      '?subject=' + encodeURIComponent(subject) +
+                      '&body=' + encodeURIComponent(body);
+    window.location.href = mailtoUrl;
+
+  } catch (err) {
+    console.error('Email-via-link failed:', err);
+    // Fallback: open mailto without a link, ask user to attach manually
+    if (confirm('Could not upload to SharePoint:\n\n' + (err.message || err) + '\n\n' +
+                'Open the email anyway? (You\'ll need to download the PDF and attach it manually.)')) {
+      const body =
+        'Hi,\n\n' +
+        'Please find the latest Care Plan for ' + clientName + ' attached.\n\n' +
+        '(Reminder: download the PDF from the toolbar 📥 PDF button, then attach to this email.)\n\n' +
+        'Kind regards,\n' + fromName + '\n' + 'One Dream Community';
+      window.location.href = 'mailto:' + encodeURIComponent(toEmail) +
+                             '?subject=' + encodeURIComponent(subject) +
+                             '&body=' + encodeURIComponent(body);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
   }
 }
 document.getElementById('btnEmailCoord').addEventListener('click', executeEmailCoordinator);
