@@ -4679,22 +4679,13 @@ if (_activeId && loadClient(_activeId) && state.mode) {
     migModal.addEventListener('click', function(e) { if (e.target === migModal) migModal.style.display = 'none'; });
   };
 
-  // Refresh function — called after overlay hides, re-runs the startup logic with cloud data
+  // Refresh function — called after overlay hides.
+  // Always start at the Welcome / "Resume a client" screen so the user can choose which
+  // client to open. (Don't auto-resume the last active client — staff prefer to pick fresh.)
   window.__refreshAppFromCloud = function() {
-    const cache = ODC_CLOUD.clientCache;
-    const activeId = localStorage.getItem(ACTIVE_KEY);
-    // If there's an active client AND it exists in the cloud cache, resume it.
-    if (activeId && cache[activeId]) {
-      if (loadClient(activeId) && state.mode) {
-        hideMidPicker();
-        showAppShell();
-        initApp();
-        if (typeof window.__refreshMigrateBanner === 'function') window.__refreshMigrateBanner();
-        if (typeof updateInterimButton === 'function') updateInterimButton();
-        return;
-      }
-    }
-    // Otherwise show the mode picker — re-render saved clients with cloud data
+    // Clear any stale active-client pointer from a previous session
+    localStorage.removeItem(ACTIVE_KEY);
+    activeClientId = null;
     showModePicker();
     if (typeof renderSavedClients === 'function') renderSavedClients();
     if (typeof window.__refreshMigrateBanner === 'function') window.__refreshMigrateBanner();
