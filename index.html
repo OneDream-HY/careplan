@@ -1012,7 +1012,7 @@ window.ODC_CLOUD = (function() {
       <button class="mini-btn" id="btnImport" title="Restore from JSON backup">⬆ Restore</button>
       <input type="file" id="fileInput" class="file-input" accept=".json,application/json"/>
       <button class="mini-btn" id="btnUpdates" title="View change history & add new updates">📋 Updates <span id="btnUpdatesBadge" style="display:none;background:#b85a3a;color:#fff;border-radius:999px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">0</span></button>
-      <button class="mini-btn" id="btnInterim" title="Quick interim care plan (New Client mode only)" style="display:none">📝 Interim CP</button>
+      <button class="mini-btn" id="btnInterim" title="Quick interim care plan" style="display:none">📝 Interim CP</button>
       <button class="mini-btn primary" id="btnPrint">🖨 Print…</button>
     </div>
   </div>
@@ -3863,8 +3863,8 @@ function _initInterimEditor() {
 function updateInterimButton() {
   const btn = document.getElementById('btnInterim');
   if (!btn) return;
-  // Show only in 'new' mode
-  if (state.mode === 'new') {
+  // Show in both New Client and Annual Review modes
+  if (state.mode === 'new' || state.mode === 'annual') {
     btn.style.display = '';
     btn.textContent = interimHasData() ? '📝 Interim CP ✓' : '+ Interim CP';
   } else {
