@@ -3089,18 +3089,26 @@ function buildCarePlan() {
     medication: ['medications'],
     pain:       ['pain'],
     diabetes:   ['diabetes'],
-    enteral:    ['nutrition'],
+    enteral:    [], // handled by special case in shouldShowDomain (PEG-specific check)
     catheter:   ['catheter'],
+    palliative: ['palliative'],
     home:       [],
     social:     []
   };
-  // Strict gating for diabetes / enteral / catheter:
+  // Strict gating for specialised domains:
   // these domains ONLY appear in the Care Plan when the corresponding Additional Assessment
-  // is ticked (state.selectedTools / state.manualTools). NO fallback to auto-populated data.
+  // is ticked (state.selectedTools / state.manualTools).
   // Rationale: per ODC, the chain Initial → Additional Ax → Care Plan must stay connected;
   // these specialised domains shouldn't be generated unless the staff has actually completed
   // the matching assessment form.
+  // Special case: 'enteral' is gated on the PEG/NG feeding flag specifically, NOT on the
+  // Nutrition AX in general — because Nutrition AX is also used for non-PEG cases.
   function shouldShowDomain(id) {
+    if (id === 'enteral') {
+      // Show only when PEG/NG feeding is indicated (Initial Ax tick) OR enteral fields
+      // have been filled in (Nutrition Ax enteral section).
+      return !!(D.ia_pegFeeding || D.nu_enteral_type || D.nu_enteral_mode || D.nu_enteral_name);
+    }
     const tools = DOMAIN_TO_TOOLS[id] || [];
     const sel = state.selectedTools || {};
     const man = state.manualTools || {};
@@ -3199,6 +3207,16 @@ function buildCarePlan() {
       D.ia_social_friends && `friends: ${D.ia_social_friends}`,
       (D.ia_transport_used||[]).length && `transport: ${(D.ia_transport_used||[]).join(', ')}`,
       D.an_transport && `transport: ${D.an_transport}`,
+    ].filter(Boolean).join(' · '),
+    palliative: [
+      D.ia_palliative && 'terminal illness / palliative',
+      D.med_terminal && `condition: ${D.med_terminal}`,
+      D.pal_acd === 'Yes' && 'Advance Care Directive in place',
+      D.pal_acd === 'No' && D.pal_acd_soon === 'Yes' && 'ACD to be done soon',
+      D.pal_org && `palliative service: ${D.pal_org}`,
+      D.pal_pain && `pain: ${D.pal_pain}`,
+      D.pal_resp && `respiratory: ${D.pal_resp}`,
+      D.pal_spiritual && `spiritual: ${D.pal_spiritual}`,
     ].filter(Boolean).join(' · '),
   };
 
@@ -3317,6 +3335,7 @@ function buildCarePlan() {
     extra: `<div>${ta('cp_enteral_dietitian','Dietitian regime — please attach original report',{rows:1})}</div>`
   }) : ''}
   ${shouldShowDomain('catheter') ? cpDomain('catheter','Catheter Management',{autoNeeds: autoFor.catheter}) : ''}
+  ${shouldShowDomain('palliative') ? cpDomain('palliative','Palliative Care',{autoNeeds: autoFor.palliative}) : ''}
   ${cpDomain('home','Home Environment Safety',{autoNeeds: autoFor.home})}
   ${cpDomain('social','Social Connection & Transport',{autoNeeds: autoFor.social})}
 
