@@ -3530,7 +3530,13 @@ function renderSavedClients() {
     return String(s).split('@')[0].split('.').join(' ');
   }
   root.innerHTML = '<h3>Resume a client (' + list.length + ')</h3>' + list.map(c => {
-    const safe = _esc(c.name || '(unnamed)');
+    // Prefer the actual participant name (state.data.p_name) over the default
+    // "New Client · started ..." label. Fall back to preferred name, then cached label.
+    const d = (c.state && c.state.data) || {};
+    const pName = (d.p_name || '').toString().trim();
+    const pPref = (d.p_preferred || '').toString().trim();
+    const displayName = pName || pPref || c.name || '(unnamed)';
+    const safe = _esc(displayName);
     const startedBy = _shortName(c.createdBy || '');
     const lastBy = _shortName(c.lastModifiedBy || '');
     let meta = 'Saved ' + _esc(_shortDate(c.lastSaved));
@@ -4101,6 +4107,16 @@ if (_activeId && loadClient(_activeId) && state.mode) {
           const _userLabel = _u.name || _u.email || '';
           let entry = activeClientId ? cache[activeClientId] : null;
           if (!activeClientId || !entry) {
+            // Don't create a NEW entry just for opening the form — only save once the
+            // user has typed something meaningful. Prevents empty placeholder entries
+            // every time someone clicks "New Client" or "Annual Review" and looks around.
+            const hasMeaningfulData = state.data && Object.keys(state.data).some(k => {
+              const v = state.data[k];
+              return v != null && String(v).trim() !== '';
+            });
+            if (!hasMeaningfulData) {
+              return; // skip — nothing worth saving yet
+            }
             activeClientId = genClientId();
             entry = { id: activeClientId, mode: state.mode, createdAt: Date.now(), createdBy: _userLabel };
           }
