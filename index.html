@@ -31,8 +31,7 @@
     document.head.appendChild(s);
   }
 </script>
-<!-- html2pdf.js for PDF auto-download (loads asynchronously, won't block app start) -->
-<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js" defer></script>
+<!-- (PDF download via html2pdf was removed — saving as PDF is now done via the browser's print dialog "Save as PDF" option) -->
 
 <script>
   // SharePoint / Azure AD configuration for ODC
@@ -805,23 +804,7 @@ window.ODC_CLOUD = (function() {
     body.print-filter .card.print-page:not(.print-include),
     body.print-filter .card.cp-domain:not(.print-include) { display: none !important; page-break-before: avoid !important; page-break-after: avoid !important; }
   }
-  /* Same hiding rules but applied OUTSIDE @media print, for PDF download mode.
-     html2pdf renders the live DOM via html2canvas — it doesn't apply @media print, so we
-     replicate the rules under a class flag (.pdf-export) that's set during PDF generation. */
-  body.pdf-export.print-filter #step-initial:not(.print-include),
-  body.pdf-export.print-filter #step-annual:not(.print-include),
-  body.pdf-export.print-filter #step-updates-history:not(.print-include),
-  body.pdf-export.print-filter #step-interim-cp:not(.print-include),
-  body.pdf-export.print-filter .ax-block:not(.print-include),
-  body.pdf-export.print-filter .card.print-page:not(.print-include),
-  body.pdf-export.print-filter .card.cp-domain:not(.print-include) { display: none !important; }
-  body.pdf-export.print-filter #step-updates-history.print-include,
-  body.pdf-export.print-filter #step-interim-cp.print-include { display: block !important; }
-  body.pdf-export .no-print { display: none !important; }
-  body.pdf-export .print-header { display: flex !important; }
-  body.pdf-export .step-panel { display: block !important; }
-  body.pdf-export .step-panel:not(.print-include):not(:has(.print-include)) { display: none !important; }
-  body.pdf-export #appMain { display: block !important; }
+  /* (pdf-export rules removed — PDF export is now done via the browser print dialog) */
   @media print {
 
     /* When updates history / interim CP IS included, force it to be visible */
@@ -1038,7 +1021,6 @@ window.ODC_CLOUD = (function() {
       <input type="file" id="fileInput" class="file-input" accept=".json,application/json"/>
       <button class="mini-btn" id="btnUpdates" title="View change history & add new updates">📋 Updates <span id="btnUpdatesBadge" style="display:none;background:#b85a3a;color:#fff;border-radius:999px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">0</span></button>
       <button class="mini-btn" id="btnInterim" title="Quick interim care plan" style="display:none">📝 Interim CP</button>
-      <button class="mini-btn" id="btnQuickPdf" title="Download the entire care plan as a PDF (no selection needed)">📥 PDF</button>
       <button class="mini-btn" id="btnEmailCoord" title="Email the care plan to this client's coordinator">📧 Email</button>
       <button class="mini-btn primary" id="btnPrint">🖨 Print…</button>
     </div>
@@ -1061,7 +1043,6 @@ window.ODC_CLOUD = (function() {
     <div id="printList" style="flex:1 1 auto;overflow-y:auto;padding:10px 0;min-height:0"></div>
     <div style="flex:0 0 auto;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--line);padding-top:12px">
       <button class="btn ghost" id="btnPrintCancel">Cancel</button>
-      <button class="btn ghost" id="btnPrintPdf">📥 Save as PDF</button>
       <button class="btn" id="btnPrintGo">🖨 Print selected</button>
     </div>
   </div>
@@ -4046,123 +4027,19 @@ document.getElementById('btnPrint2').addEventListener('click', openPrintPicker);
 document.getElementById('btnPrintCancel').addEventListener('click', closePrintPicker);
 document.getElementById('btnPrintGo').addEventListener('click', executePrint);
 
-async function executeSavePdf() {
-  if (typeof html2pdf === 'undefined') {
-    alert('PDF library is still loading. Please wait a moment and try again.');
-    return;
-  }
-  const items = buildPrintItems();
-  const itemsByKey = {}; items.forEach(i => itemsByKey[i.key] = i);
-  const checked = {};
-  document.querySelectorAll('#printList input[type="checkbox"]').forEach(c => {
-    if (c.checked) checked[c.dataset.pk] = true;
-  });
-  if (Object.keys(checked).length === 0) {
-    alert('Pick at least one form to include in the PDF.');
-    return;
-  }
-  state.printSelection = checked;
-
-  // Apply same selection logic as Print
-  document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
-  Object.keys(checked).forEach(k => {
-    const it = itemsByKey[k];
-    if (it && it.target) it.target.classList.add('print-include');
-  });
-  document.querySelectorAll('.step-panel').forEach(p => p.classList.add('active'));
-  document.body.classList.add('print-filter');
-  document.body.classList.add('pdf-export'); // triggers PDF-mode CSS overrides
-
-  // Build filename — uses participant name when available
-  const safeName = (state.data.p_name || 'client').replace(/[^a-zA-Z0-9가-힣]+/g, '_').replace(/^_|_$/g, '') || 'client';
-  const dateStr = new Date().toISOString().slice(0, 10);
-  const filename = 'ODC_CarePlan_' + safeName + '_' + dateStr + '.pdf';
-
-  // Show "Generating…" feedback
-  const goBtn = document.getElementById('btnPrintPdf');
-  const origText = goBtn.textContent;
-  goBtn.disabled = true;
-  goBtn.textContent = 'Generating PDF…';
-  closePrintPicker();
-
-  // Wait a tick so DOM/styles settle, then render
-  await new Promise(r => setTimeout(r, 100));
-
-  try {
-    await html2pdf()
-      .set({
-        margin:      [10, 8, 10, 8],
-        filename:    filename,
-        image:       { type: 'jpeg', quality: 0.95 },
-        html2canvas: { scale: 2, useCORS: true, logging: false, windowWidth: 1024 },
-        jsPDF:       { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
-        pagebreak:   { mode: ['css', 'legacy'] }
-      })
-      .from(document.getElementById('appMain'))
-      .save();
-  } catch (err) {
-    console.error('PDF generation failed:', err);
-    alert('PDF generation failed: ' + (err.message || err));
-  } finally {
-    document.body.classList.remove('print-filter');
-    document.body.classList.remove('pdf-export');
-    document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
-    document.querySelectorAll('.step-panel').forEach(p => p.classList.toggle('active', p.dataset.step === state.currentStep));
-    goBtn.disabled = false;
-    goBtn.textContent = origText;
-  }
-}
-document.getElementById('btnPrintPdf').addEventListener('click', executeSavePdf);
-
-/* Quick PDF — one-click toolbar shortcut. Pre-selects ALL items and triggers the browser
-   print dialog. User chooses "Save as PDF" as the destination. This is more reliable than
-   html2canvas-based PDF generation, which struggles with form fields and signatures. */
-function executeQuickPdf() {
-  // Make sure care plan content is rendered (so its sections are in DOM and selectable)
-  if (state.mode === 'new' || state.mode === 'annual') {
-    if (state.currentStep !== 'careplan') renderCarePlan();
-  }
-  const items = buildPrintItems();
-  if (items.length === 0) {
-    alert('Nothing to export yet — start filling in the assessment first.');
-    return;
-  }
-  // Mark all items as included
-  document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
-  items.forEach(it => { if (it.target) it.target.classList.add('print-include'); });
-  document.querySelectorAll('.step-panel').forEach(p => p.classList.add('active'));
-  document.body.classList.add('print-filter');
-
-  // Set the document title — many browsers use this as the default PDF filename
-  const safeName = (state.data.p_name || 'client').replace(/[^a-zA-Z0-9가-힣]+/g, '_').replace(/^_|_$/g, '') || 'client';
-  const dateStr = new Date().toISOString().slice(0, 10);
-  const origTitle = document.title;
-  document.title = 'ODC_CarePlan_' + safeName + '_' + dateStr;
-
-  setTimeout(() => {
-    window.print();
-    setTimeout(() => {
-      document.body.classList.remove('print-filter');
-      document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
-      document.querySelectorAll('.step-panel').forEach(p => p.classList.toggle('active', p.dataset.step === state.currentStep));
-      document.title = origTitle;
-    }, 600);
-  }, 60);
-}
-document.getElementById('btnQuickPdf').addEventListener('click', executeQuickPdf);
-
-/* Email coordinator — generates PDF, uploads to SharePoint, gets a sharing link,
-   then opens the user's email client with the link in the body.
-   Per-client coordinator email is remembered in state.data.coordinator_email.
-   Falls back to "open mailto + manual attach" if PDF generation fails. */
-async function executeEmailCoordinator() {
+/* Email coordinator — opens the user's email client with subject + body pre-filled.
+   The user saves the PDF themselves (via 🖨 Print → Save as PDF in the browser dialog)
+   and attaches it to the email manually. No PDF generation in code (html2canvas-based
+   approaches were unreliable with form fields & signatures). */
+function executeEmailCoordinator() {
   if (!state.mode) { alert('Open a client first.'); return; }
 
-  // Get / prompt for coordinator email (stored per-client)
+  // Get / prompt for coordinator email (stored per-client so they don't have to retype)
   let toEmail = (state.data.coordinator_email || '').trim();
   const promptMsg = toEmail
     ? 'Coordinator email for ' + (state.data.p_name || 'this client') + ':'
-    : 'Enter coordinator email for ' + (state.data.p_name || 'this client') + '\n(Saved with the client — only need to enter once.)';
+    : 'Enter coordinator email for ' + (state.data.p_name || 'this client') +
+      '\n(Saved with the client — only need to enter once.)';
   const entered = prompt(promptMsg, toEmail);
   if (entered === null) return; // user cancelled
   toEmail = entered.trim();
@@ -4171,130 +4048,44 @@ async function executeEmailCoordinator() {
     alert('That doesn\'t look like a valid email address.');
     return;
   }
-  // Save for next time
   if (state.data.coordinator_email !== toEmail) {
     state.data.coordinator_email = toEmail;
     autoSave();
   }
 
-  const clientName = (state.data.p_name || '').trim() || '(unnamed client)';
+  const D = state.data || {};
+  const clientName = (D.p_name || '').trim() || '(unnamed client)';
   const dateLabel = new Date().toLocaleDateString(undefined, { day:'numeric', month:'long', year:'numeric' });
   const subject = 'Care Plan — ' + clientName + ' (' + dateLabel + ')';
   const me = (typeof ODC_CLOUD !== 'undefined' && ODC_CLOUD.getUser && ODC_CLOUD.getUser()) || {};
   const fromName = me.name || me.email || 'ODC Care Team';
+  const fundingArr = Array.isArray(D.p_funding) ? D.p_funding : [];
 
-  if (!confirm('This will:\n\n' +
-               '  1. Generate the PDF\n' +
-               '  2. Upload it to SharePoint (CarePlan PDFs folder)\n' +
-               '  3. Create a secure share link\n' +
-               '  4. Open your email with the link prefilled\n\n' +
-               'To: ' + toEmail + '\nSubject: ' + subject + '\n\n' +
-               'Continue?')) return;
+  const body = [
+    'Hi,',
+    '',
+    'Please find attached the latest Care Plan for ' + clientName + (D.p_dob ? ' (DOB ' + D.p_dob + ')' : '') + '.',
+    '',
+    'Summary:',
+    '  • Mode: ' + (state.mode === 'annual' ? 'Annual Review' : 'New Client'),
+    '  • Funding: ' + (fundingArr.length ? fundingArr.join(', ') : '—'),
+    '  • Diagnosis: ' + (D.med_diagnosis || '—'),
+    '  • Allergies: ' + (D.med_allergies || '—'),
+    '  • Last updated: ' + dateLabel,
+    '',
+    'To attach the PDF: click 🖨 Print in the care plan → tick the documents → Print selected → in the browser print dialog choose "Save as PDF" → attach the saved PDF to this email.',
+    '',
+    'Let me know if you need anything else.',
+    '',
+    'Kind regards,',
+    fromName,
+    'One Dream Community'
+  ].join('\r\n');
 
-  const btn = document.getElementById('btnEmailCoord');
-  const orig = btn.textContent;
-  btn.disabled = true;
-
-  try {
-    if (typeof html2pdf === 'undefined') throw new Error('PDF library not loaded yet — please wait a moment and retry.');
-
-    // === 1. Generate PDF as Blob ===
-    btn.textContent = '⏳ Generating PDF…';
-    if (state.currentStep !== 'careplan') renderCarePlan();
-    const items = buildPrintItems();
-    if (items.length === 0) throw new Error('Nothing to export yet — fill in the assessment first.');
-
-    document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
-    items.forEach(it => { if (it.target) it.target.classList.add('print-include'); });
-    document.querySelectorAll('.step-panel').forEach(p => p.classList.add('active'));
-    document.body.classList.add('print-filter');
-    document.body.classList.add('pdf-export');
-
-    await new Promise(r => setTimeout(r, 150)); // let layout settle
-
-    let pdfBlob;
-    try {
-      pdfBlob = await html2pdf()
-        .set({
-          margin: [10, 10, 10, 10],
-          image:  { type: 'jpeg', quality: 0.92 },
-          html2canvas: { scale: 1.6, useCORS: true, logging: false, scrollX: 0, scrollY: 0 },
-          jsPDF:  { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
-          pagebreak: { mode: ['css', 'legacy'] }
-        })
-        .from(document.getElementById('appMain'))
-        .toPdf()
-        .output('blob');
-    } finally {
-      document.body.classList.remove('print-filter');
-      document.body.classList.remove('pdf-export');
-      document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
-      document.querySelectorAll('.step-panel').forEach(p => p.classList.toggle('active', p.dataset.step === state.currentStep));
-    }
-
-    // === 2. Upload PDF to SharePoint ===
-    btn.textContent = '⏳ Uploading to SharePoint…';
-    const safeName = clientName.replace(/[^a-zA-Z0-9가-힣]+/g, '_').replace(/^_|_$/g, '') || 'client';
-    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filename = 'ODC_CarePlan_' + safeName + '_' + ts + '.pdf';
-    const folder = 'CarePlan PDFs';
-    const siteId = ODC_CLOUD.siteId || await ODC_CLOUD.resolveSite();
-
-    const uploadPath = '/sites/' + siteId + '/drive/root:/' + encodeURIComponent(folder) + '/' + encodeURIComponent(filename) + ':/content';
-    const uploaded = await ODC_CLOUD.graph(uploadPath, {
-      method: 'PUT',
-      body: pdfBlob,
-      headers: { 'Content-Type': 'application/pdf' }
-    });
-    const fileId = uploaded.id;
-
-    // === 3. Get sharing link (organisation-scoped, view-only) ===
-    btn.textContent = '⏳ Creating share link…';
-    const linkResp = await ODC_CLOUD.graph(
-      '/sites/' + siteId + '/drive/items/' + fileId + '/createLink',
-      { method: 'POST', body: { type: 'view', scope: 'organization' } }
-    );
-    const shareUrl = (linkResp && linkResp.link && linkResp.link.webUrl) || uploaded.webUrl;
-    if (!shareUrl) throw new Error('Could not obtain a share link.');
-
-    // === 4. Open mailto with the link ===
-    const body =
-      'Hi,\n\n' +
-      'The latest Care Plan for ' + clientName + ' is ready. View / download it here (ODC sign-in required):\n\n' +
-      shareUrl + '\n\n' +
-      'Summary:\n' +
-      '  • Mode: ' + (state.mode === 'annual' ? 'Annual Review' : 'New Client / Care Plan') + '\n' +
-      '  • DOB: ' + (state.data.p_dob || '—') + '\n' +
-      '  • Diagnosis: ' + (state.data.med_diagnosis || '—') + '\n' +
-      '  • Allergies: ' + (state.data.med_allergies || '—') + '\n\n' +
-      'The file lives in the SharePoint "CarePlan PDFs" folder for audit / re-download.\n\n' +
-      'Kind regards,\n' +
-      fromName + '\n' +
-      'One Dream Community';
-
-    const mailtoUrl = 'mailto:' + encodeURIComponent(toEmail) +
-                      '?subject=' + encodeURIComponent(subject) +
-                      '&body=' + encodeURIComponent(body);
-    window.location.href = mailtoUrl;
-
-  } catch (err) {
-    console.error('Email-via-link failed:', err);
-    // Fallback: open mailto without a link, ask user to attach manually
-    if (confirm('Could not upload to SharePoint:\n\n' + (err.message || err) + '\n\n' +
-                'Open the email anyway? (You\'ll need to download the PDF and attach it manually.)')) {
-      const body =
-        'Hi,\n\n' +
-        'Please find the latest Care Plan for ' + clientName + ' attached.\n\n' +
-        '(Reminder: download the PDF from the toolbar 📥 PDF button, then attach to this email.)\n\n' +
-        'Kind regards,\n' + fromName + '\n' + 'One Dream Community';
-      window.location.href = 'mailto:' + encodeURIComponent(toEmail) +
-                             '?subject=' + encodeURIComponent(subject) +
-                             '&body=' + encodeURIComponent(body);
-    }
-  } finally {
-    btn.disabled = false;
-    btn.textContent = orig;
-  }
+  const mailtoUrl = 'mailto:' + encodeURIComponent(toEmail) +
+                    '?subject=' + encodeURIComponent(subject) +
+                    '&body=' + encodeURIComponent(body);
+  window.location.href = mailtoUrl;
 }
 document.getElementById('btnEmailCoord').addEventListener('click', executeEmailCoordinator);
 function updatePrintCount() {
