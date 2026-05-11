@@ -31,6 +31,8 @@
     document.head.appendChild(s);
   }
 </script>
+<!-- html2pdf.js for PDF auto-download (loads asynchronously, won't block app start) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.2/html2pdf.bundle.min.js" defer></script>
 
 <script>
   // SharePoint / Azure AD configuration for ODC
@@ -798,6 +800,25 @@ window.ODC_CLOUD = (function() {
     body.print-filter .ax-block:not(.print-include),
     body.print-filter .card.print-page:not(.print-include),
     body.print-filter .card.cp-domain:not(.print-include) { display: none !important; page-break-before: avoid !important; page-break-after: avoid !important; }
+  }
+  /* Same hiding rules but applied OUTSIDE @media print, for PDF download mode.
+     html2pdf renders the live DOM via html2canvas — it doesn't apply @media print, so we
+     replicate the rules under a class flag (.pdf-export) that's set during PDF generation. */
+  body.pdf-export.print-filter #step-initial:not(.print-include),
+  body.pdf-export.print-filter #step-annual:not(.print-include),
+  body.pdf-export.print-filter #step-updates-history:not(.print-include),
+  body.pdf-export.print-filter #step-interim-cp:not(.print-include),
+  body.pdf-export.print-filter .ax-block:not(.print-include),
+  body.pdf-export.print-filter .card.print-page:not(.print-include),
+  body.pdf-export.print-filter .card.cp-domain:not(.print-include) { display: none !important; }
+  body.pdf-export.print-filter #step-updates-history.print-include,
+  body.pdf-export.print-filter #step-interim-cp.print-include { display: block !important; }
+  body.pdf-export .no-print { display: none !important; }
+  body.pdf-export .print-header { display: flex !important; }
+  body.pdf-export .step-panel { display: block !important; }
+  body.pdf-export .step-panel:not(.print-include):not(:has(.print-include)) { display: none !important; }
+  body.pdf-export #appMain { display: block !important; }
+  @media print {
 
     /* When updates history / interim CP IS included, force it to be visible */
     body.print-filter #step-updates-history.print-include,
@@ -1034,6 +1055,7 @@ window.ODC_CLOUD = (function() {
     <div id="printList" style="flex:1 1 auto;overflow-y:auto;padding:10px 0;min-height:0"></div>
     <div style="flex:0 0 auto;display:flex;gap:8px;justify-content:flex-end;border-top:1px solid var(--line);padding-top:12px">
       <button class="btn ghost" id="btnPrintCancel">Cancel</button>
+      <button class="btn ghost" id="btnPrintPdf">📥 Save as PDF</button>
       <button class="btn" id="btnPrintGo">🖨 Print selected</button>
     </div>
   </div>
@@ -3044,6 +3066,41 @@ function cpDomain(id, label, opts) {
 
 function buildCarePlan() {
   const D = state.data;
+
+  // Decide which care-plan domains to render. Show a domain only if the matching
+  // Additional Assessment was ticked (state.selectedTools / state.manualTools)
+  // OR there is auto-populated info for it (autoFor[domain] has text).
+  // Always-shown core sections (snapshot, prev, peep, risk, signatures) are NOT
+  // gated by this function — they're part of the standard Care Plan structure.
+  const DOMAIN_TO_TOOLS = {
+    nutrition:  ['nutrition', 'mna'],
+    hygiene:    ['hygiene'],
+    mobility:   ['mobility', 'frat'],
+    continence: ['continence'],
+    behaviour:  ['behaviour'],
+    cognition:  ['communication'],
+    skin:       ['skin', 'wound'],
+    medication: ['medications'],
+    pain:       ['pain'],
+    diabetes:   ['diabetes'],
+    enteral:    ['nutrition'],
+    catheter:   ['catheter'],
+    home:       [],
+    social:     []
+  };
+  // Strict gating for diabetes / enteral / catheter:
+  // these domains ONLY appear in the Care Plan when the corresponding Additional Assessment
+  // is ticked (state.selectedTools / state.manualTools). NO fallback to auto-populated data.
+  // Rationale: per ODC, the chain Initial → Additional Ax → Care Plan must stay connected;
+  // these specialised domains shouldn't be generated unless the staff has actually completed
+  // the matching assessment form.
+  function shouldShowDomain(id) {
+    const tools = DOMAIN_TO_TOOLS[id] || [];
+    const sel = state.selectedTools || {};
+    const man = state.manualTools || {};
+    return tools.some(t => sel[t] || man[t]);
+  }
+
   // Auto-populated summary text per domain — pulled from assessments (Initial / Annual / individual Ax forms)
   const autoFor = {
     nutrition: [
@@ -3248,12 +3305,12 @@ function buildCarePlan() {
   ${cpDomain('skin','Skin Integrity',{autoNeeds: autoFor.skin})}
   ${cpDomain('medication','Medication Management',{autoNeeds: autoFor.medication})}
   ${cpDomain('pain','Pain Management',{autoNeeds: autoFor.pain})}
-  ${cpDomain('diabetes','Diabetic Management',{autoNeeds: autoFor.diabetes})}
-  ${cpDomain('enteral','Enteral Feeding Management',{
+  ${shouldShowDomain('diabetes') ? cpDomain('diabetes','Diabetic Management',{autoNeeds: autoFor.diabetes}) : ''}
+  ${shouldShowDomain('enteral') ? cpDomain('enteral','Enteral Feeding Management',{
     autoNeeds: autoFor.enteral,
     extra: `<div>${ta('cp_enteral_dietitian','Dietitian regime — please attach original report',{rows:1})}</div>`
-  })}
-  ${cpDomain('catheter','Catheter Management',{autoNeeds: autoFor.catheter})}
+  }) : ''}
+  ${shouldShowDomain('catheter') ? cpDomain('catheter','Catheter Management',{autoNeeds: autoFor.catheter}) : ''}
   ${cpDomain('home','Home Environment Safety',{autoNeeds: autoFor.home})}
   ${cpDomain('social','Social Connection & Transport',{autoNeeds: autoFor.social})}
 
@@ -3963,6 +4020,74 @@ document.getElementById('btnPrint').addEventListener('click', openPrintPicker);
 document.getElementById('btnPrint2').addEventListener('click', openPrintPicker);
 document.getElementById('btnPrintCancel').addEventListener('click', closePrintPicker);
 document.getElementById('btnPrintGo').addEventListener('click', executePrint);
+
+async function executeSavePdf() {
+  if (typeof html2pdf === 'undefined') {
+    alert('PDF library is still loading. Please wait a moment and try again.');
+    return;
+  }
+  const items = buildPrintItems();
+  const itemsByKey = {}; items.forEach(i => itemsByKey[i.key] = i);
+  const checked = {};
+  document.querySelectorAll('#printList input[type="checkbox"]').forEach(c => {
+    if (c.checked) checked[c.dataset.pk] = true;
+  });
+  if (Object.keys(checked).length === 0) {
+    alert('Pick at least one form to include in the PDF.');
+    return;
+  }
+  state.printSelection = checked;
+
+  // Apply same selection logic as Print
+  document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
+  Object.keys(checked).forEach(k => {
+    const it = itemsByKey[k];
+    if (it && it.target) it.target.classList.add('print-include');
+  });
+  document.querySelectorAll('.step-panel').forEach(p => p.classList.add('active'));
+  document.body.classList.add('print-filter');
+  document.body.classList.add('pdf-export'); // triggers PDF-mode CSS overrides
+
+  // Build filename — uses participant name when available
+  const safeName = (state.data.p_name || 'client').replace(/[^a-zA-Z0-9가-힣]+/g, '_').replace(/^_|_$/g, '') || 'client';
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const filename = 'ODC_CarePlan_' + safeName + '_' + dateStr + '.pdf';
+
+  // Show "Generating…" feedback
+  const goBtn = document.getElementById('btnPrintPdf');
+  const origText = goBtn.textContent;
+  goBtn.disabled = true;
+  goBtn.textContent = 'Generating PDF…';
+  closePrintPicker();
+
+  // Wait a tick so DOM/styles settle, then render
+  await new Promise(r => setTimeout(r, 100));
+
+  try {
+    await html2pdf()
+      .set({
+        margin:      [10, 8, 10, 8],
+        filename:    filename,
+        image:       { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, logging: false, windowWidth: 1024 },
+        jsPDF:       { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
+        pagebreak:   { mode: ['css', 'legacy'] }
+      })
+      .from(document.getElementById('appMain'))
+      .save();
+  } catch (err) {
+    console.error('PDF generation failed:', err);
+    alert('PDF generation failed: ' + (err.message || err));
+  } finally {
+    document.body.classList.remove('print-filter');
+    document.body.classList.remove('pdf-export');
+    document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
+    document.querySelectorAll('.step-panel').forEach(p => p.classList.toggle('active', p.dataset.step === state.currentStep));
+    goBtn.disabled = false;
+    goBtn.textContent = origText;
+  }
+}
+document.getElementById('btnPrintPdf').addEventListener('click', executeSavePdf);
 function updatePrintCount() {
   const n = document.querySelectorAll('#printList input[type="checkbox"]:checked').length;
   const total = document.querySelectorAll('#printList input[type="checkbox"]').length;
