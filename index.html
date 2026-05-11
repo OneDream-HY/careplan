@@ -227,8 +227,9 @@ window.ODC_CLOUD = (function() {
       throw new Error('Required columns not found. Need ClientID + PlanData (current: ' +
                       'id=' + idF + ', data=' + dataF + ')');
     }
+    // Expand fields AND createdBy/lastModifiedBy so we can show who started / last updated each client
     const items = await graph('/sites/' + siteId + '/lists/' + _clientsListId +
-                              '/items?expand=fields&$top=999');
+                              '/items?expand=fields,createdByUser,lastModifiedByUser&$top=999');
     const cache = {};
     for (const item of (items.value || [])) {
       const f = item.fields || {};
@@ -236,6 +237,9 @@ window.ODC_CLOUD = (function() {
       if (!cid) continue; // skip rows without our internal ID
       let st = {};
       try { st = JSON.parse(f[dataF] || '{}'); } catch (e) { console.warn('Bad PlanData for', cid, e); }
+      // Author info from SP item metadata (auto-tracked, no extra columns needed)
+      const _createdBy = (item.createdBy && item.createdBy.user && (item.createdBy.user.displayName || item.createdBy.user.email)) || '';
+      const _modifiedBy = (item.lastModifiedBy && item.lastModifiedBy.user && (item.lastModifiedBy.user.displayName || item.lastModifiedBy.user.email)) || '';
       cache[cid] = {
         id: cid,
         spItemId: item.id,
@@ -244,6 +248,8 @@ window.ODC_CLOUD = (function() {
                           (st.mode || 'new'),
         createdAt: st.createdAt || (item.createdDateTime ? new Date(item.createdDateTime).getTime() : Date.now()),
         lastSaved: item.lastModifiedDateTime ? new Date(item.lastModifiedDateTime).getTime() : Date.now(),
+        createdBy: _createdBy,
+        lastModifiedBy: _modifiedBy,
         state: st
       };
     }
@@ -3503,12 +3509,21 @@ function renderSavedClients() {
     root.innerHTML = '<h3>Saved clients</h3><div class="empty">No saved clients yet — start a new one below.</div>';
     return;
   }
+  function _esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
   root.innerHTML = '<h3>Resume a client (' + list.length + ')</h3>' + list.map(c => {
     const dt = c.lastSaved ? new Date(c.lastSaved) : null;
     const when = dt ? dt.toLocaleString(undefined, {dateStyle:'medium', timeStyle:'short'}) : '—';
-    const safe = (c.name||'(unnamed)').replace(/</g,'&lt;');
+    const cdt = c.createdAt ? new Date(c.createdAt) : null;
+    const cwhen = cdt ? cdt.toLocaleString(undefined, {dateStyle:'medium', timeStyle:'short'}) : '—';
+    const startedBy = c.createdBy || '';
+    const lastBy = c.lastModifiedBy || '';
+    const safe = _esc(c.name || '(unnamed)');
+    let meta = '<small>Last saved: ' + _esc(when);
+    if (lastBy) meta += ' · by <strong>' + _esc(lastBy) + '</strong>';
+    meta += '</small>';
+    if (startedBy) meta += '<small style="margin-top:0">Started: ' + _esc(cwhen) + ' · by <strong>' + _esc(startedBy) + '</strong></small>';
     return `<div class="saved-row" data-cid="${c.id}">
-      <div class="sr-meta"><strong>${safe}</strong><small>${when}</small></div>
+      <div class="sr-meta"><strong>${safe}</strong>${meta}</div>
       <span class="sr-mode ${c.mode==='annual'?'annual':''}">${c.mode === 'annual' ? 'Annual Review' : 'New Client'}</span>
       <button type="button" data-resume="${c.id}">Resume →</button>
       <button type="button" data-delete="${c.id}" title="Delete this saved client">✕</button>
@@ -4068,10 +4083,12 @@ if (_activeId && loadClient(_activeId) && state.mode) {
       saveTimer = setTimeout(async function() {
         try {
           const cache = ODC_CLOUD.clientCache;
+          const _u = (ODC_CLOUD.getUser && ODC_CLOUD.getUser()) || {};
+          const _userLabel = _u.name || _u.email || '';
           let entry = activeClientId ? cache[activeClientId] : null;
           if (!activeClientId || !entry) {
             activeClientId = genClientId();
-            entry = { id: activeClientId, mode: state.mode, createdAt: Date.now() };
+            entry = { id: activeClientId, mode: state.mode, createdAt: Date.now(), createdBy: _userLabel };
           }
           const createdAt = entry.createdAt || entry.lastSaved || Date.now();
           const participantName = (state.data.p_name || '').trim();
@@ -4082,6 +4099,8 @@ if (_activeId && loadClient(_activeId) && state.mode) {
             mode: state.mode,
             createdAt: createdAt,
             lastSaved: Date.now(),
+            createdBy: entry.createdBy || _userLabel,  // preserve original creator on subsequent saves
+            lastModifiedBy: _userLabel,
             state: state
           });
           // Show "Saving…" status
