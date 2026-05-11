@@ -1034,6 +1034,7 @@ window.ODC_CLOUD = (function() {
       <input type="file" id="fileInput" class="file-input" accept=".json,application/json"/>
       <button class="mini-btn" id="btnUpdates" title="View change history & add new updates">📋 Updates <span id="btnUpdatesBadge" style="display:none;background:#b85a3a;color:#fff;border-radius:999px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">0</span></button>
       <button class="mini-btn" id="btnInterim" title="Quick interim care plan" style="display:none">📝 Interim CP</button>
+      <button class="mini-btn" id="btnQuickPdf" title="Download the entire care plan as a PDF (no selection needed)">📥 PDF</button>
       <button class="mini-btn primary" id="btnPrint">🖨 Print…</button>
     </div>
   </div>
@@ -4088,6 +4089,66 @@ async function executeSavePdf() {
   }
 }
 document.getElementById('btnPrintPdf').addEventListener('click', executeSavePdf);
+
+/* Quick PDF — one-click toolbar shortcut. Includes ALL available sections, no picker. */
+async function executeQuickPdf() {
+  if (typeof html2pdf === 'undefined') {
+    alert('PDF library is still loading. Please wait a moment and try again.');
+    return;
+  }
+  // Make sure care plan content is rendered (so its sections are in DOM and selectable)
+  if (state.mode === 'new' || state.mode === 'annual') {
+    if (state.currentStep !== 'careplan') renderCarePlan();
+  }
+  const items = buildPrintItems();
+  if (items.length === 0) {
+    alert('Nothing to export yet — start filling in the assessment first.');
+    return;
+  }
+
+  // Mark all items as included
+  document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
+  items.forEach(it => { if (it.target) it.target.classList.add('print-include'); });
+  document.querySelectorAll('.step-panel').forEach(p => p.classList.add('active'));
+  document.body.classList.add('print-filter');
+  document.body.classList.add('pdf-export');
+
+  const safeName = (state.data.p_name || 'client').replace(/[^a-zA-Z0-9가-힣]+/g, '_').replace(/^_|_$/g, '') || 'client';
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const filename = 'ODC_CarePlan_' + safeName + '_' + dateStr + '.pdf';
+
+  const btn = document.getElementById('btnQuickPdf');
+  const orig = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '⏳ Generating PDF…';
+
+  await new Promise(r => setTimeout(r, 100));
+
+  try {
+    await html2pdf()
+      .set({
+        margin:      [10, 8, 10, 8],
+        filename:    filename,
+        image:       { type: 'jpeg', quality: 0.95 },
+        html2canvas: { scale: 2, useCORS: true, logging: false, windowWidth: 1024 },
+        jsPDF:       { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
+        pagebreak:   { mode: ['css', 'legacy'] }
+      })
+      .from(document.getElementById('appMain'))
+      .save();
+  } catch (err) {
+    console.error('Quick PDF failed:', err);
+    alert('PDF generation failed: ' + (err.message || err));
+  } finally {
+    document.body.classList.remove('print-filter');
+    document.body.classList.remove('pdf-export');
+    document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
+    document.querySelectorAll('.step-panel').forEach(p => p.classList.toggle('active', p.dataset.step === state.currentStep));
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+document.getElementById('btnQuickPdf').addEventListener('click', executeQuickPdf);
 function updatePrintCount() {
   const n = document.querySelectorAll('#printList input[type="checkbox"]:checked').length;
   const total = document.querySelectorAll('#printList input[type="checkbox"]').length;
