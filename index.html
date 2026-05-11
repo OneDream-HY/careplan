@@ -1315,6 +1315,14 @@ window.ODC_CLOUD = (function() {
       </div>
     </div>
 
+    <!-- Search bar — filter saved clients by name -->
+    <div style="margin-top:14px;display:flex;align-items:center;gap:8px;border-top:1px solid var(--line);padding-top:14px">
+      <span style="color:var(--ink-muted)">🔎</span>
+      <input type="text" id="clientSearch" placeholder="Search clients by name..." autocomplete="off"
+             style="flex:1;padding:8px 12px;border:1px solid var(--line);border-radius:6px;font:inherit;font-size:14px"/>
+      <button type="button" id="clientSearchClear" style="padding:6px 10px;border:1px solid var(--line);background:#fff;border-radius:5px;font:inherit;font-size:12px;color:var(--ink-muted);cursor:pointer;display:none">✕ Clear</button>
+    </div>
+
     <div class="saved-list" id="savedClientsList"></div>
 
     <h3 style="margin-top:18px;font-size:14px;color:var(--ink-soft);text-transform:uppercase;letter-spacing:0.05em;">Start new</h3>
@@ -2934,6 +2942,12 @@ function bindSignaturePad(canvas) {
   }
 }
 function clearSignature(key) {
+  // If there's an existing signature, ask before wiping it
+  if (state.data[key]) {
+    if (!confirm('Clear this signature? You can undo right after if you change your mind.')) return;
+    // Stash the old signature so we can restore it ("Undo last clear")
+    state.data[key + '__undo'] = state.data[key];
+  }
   delete state.data[key];
   const c = document.querySelector(`[data-sigkey="${key}"]`);
   if (c) { const ctx = c.getContext('2d'); ctx.clearRect(0,0,c.width,c.height); }
@@ -2943,6 +2957,56 @@ function clearSignature(key) {
   if (wrap) wrap.classList.remove('has-sig');
   const status = document.querySelector(`[data-sigstatus="${key}"]`);
   if (status) { status.textContent = 'Sign above'; status.classList.remove('signed'); }
+  _showSigUndoButton(key);
+  autoSave();
+}
+
+function _showSigUndoButton(key) {
+  // Show an "↩ Undo" button next to the Clear button while there's stashed signature
+  const wrap = document.querySelector(`[data-sigwrap="${key}"]`);
+  if (!wrap || !state.data[key + '__undo']) return;
+  let undoBtn = wrap.querySelector('[data-sigundo="' + key + '"]');
+  if (!undoBtn) {
+    undoBtn = document.createElement('button');
+    undoBtn.type = 'button';
+    undoBtn.dataset.sigundo = key;
+    undoBtn.style.cssText = 'margin-left:6px;padding:2px 8px;border:1px solid #d4a73a;background:#fff8e1;color:#7a5a14;border-radius:4px;font:inherit;font-size:11.5px;cursor:pointer;';
+    undoBtn.textContent = '↩ Undo clear';
+    undoBtn.addEventListener('click', e => {
+      e.preventDefault();
+      restoreSignature(key);
+    });
+    const tools = wrap.querySelector('.sig-tools') || wrap;
+    tools.appendChild(undoBtn);
+  }
+  undoBtn.style.display = '';
+}
+
+function restoreSignature(key) {
+  const backup = state.data[key + '__undo'];
+  if (!backup) return;
+  state.data[key] = backup;
+  delete state.data[key + '__undo'];
+  // Redraw the canvas from the backup data URL
+  const c = document.querySelector(`[data-sigkey="${key}"]`);
+  if (c) {
+    const ctx = c.getContext('2d');
+    const img = new Image();
+    img.onload = () => {
+      ctx.clearRect(0, 0, c.width, c.height);
+      ctx.drawImage(img, 0, 0, c.width, c.height);
+    };
+    img.src = backup;
+  }
+  const sigImg = document.querySelector(`[data-sigimg="${key}"]`);
+  const wrap = document.querySelector(`[data-sigwrap="${key}"]`);
+  if (sigImg) { sigImg.src = backup; sigImg.classList.add('has-sig'); }
+  if (wrap) wrap.classList.add('has-sig');
+  const status = document.querySelector(`[data-sigstatus="${key}"]`);
+  if (status) { status.textContent = 'Signed ✓'; status.classList.add('signed'); }
+  // Hide the undo button
+  const undoBtn = document.querySelector('[data-sigundo="' + key + '"]');
+  if (undoBtn) undoBtn.style.display = 'none';
   autoSave();
 }
 function onInput(el) {
@@ -3576,9 +3640,33 @@ function renderSavedClients() {
   const root = document.getElementById('savedClientsList');
   if (!root) return;
   const map = readClients();
-  const list = Object.values(map).sort((a,b) => (b.lastSaved||0) - (a.lastSaved||0));
+  let list = Object.values(map).sort((a,b) => (b.lastSaved||0) - (a.lastSaved||0));
   if (list.length === 0) {
     root.innerHTML = '<h3>Saved clients</h3><div class="empty">No saved clients yet — start a new one below.</div>';
+    return;
+  }
+
+  // Apply search filter (matches against participant name, preferred name, and cached label)
+  const searchEl = document.getElementById('clientSearch');
+  const q = searchEl ? searchEl.value.trim().toLowerCase() : '';
+  const totalCount = list.length;
+  if (q) {
+    list = list.filter(c => {
+      const d = (c.state && c.state.data) || {};
+      const haystack = [
+        d.p_name || '',
+        d.p_preferred || '',
+        c.name || '',
+        c.createdBy || '',
+        c.lastModifiedBy || ''
+      ].join(' ').toLowerCase();
+      return haystack.indexOf(q) >= 0;
+    });
+  }
+  if (list.length === 0) {
+    root.innerHTML = '<h3>Resume a client</h3><div class="empty">No matches for "' +
+                     q.replace(/[<&]/g, m => ({'<':'&lt;','&':'&amp;'}[m])) +
+                     '". Try a different search.</div>';
     return;
   }
   function _esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
@@ -3592,7 +3680,10 @@ function renderSavedClients() {
     if (!s) return '';
     return String(s).split('@')[0].split('.').join(' ');
   }
-  root.innerHTML = '<h3>Resume a client (' + list.length + ')</h3>' + list.map(c => {
+  const heading = q
+    ? '<h3>Resume a client (' + list.length + ' of ' + totalCount + ')</h3>'
+    : '<h3>Resume a client (' + list.length + ')</h3>';
+  root.innerHTML = heading + list.map(c => {
     // Prefer the actual participant name (state.data.p_name) over the default
     // "New Client · started ..." label. Fall back to preferred name, then cached label.
     const d = (c.state && c.state.data) || {};
@@ -4613,6 +4704,30 @@ if (_activeId && loadClient(_activeId) && state.mode) {
       // Re-render client list with the newly-uploaded clients
       if (typeof renderSavedClients === 'function') renderSavedClients();
     });
+
+    // ---- Search input wiring ----
+    const searchInput = document.getElementById('clientSearch');
+    const searchClear = document.getElementById('clientSearchClear');
+    if (searchInput) {
+      let _searchTimer;
+      searchInput.addEventListener('input', function() {
+        // Show/hide the clear button based on whether there's text
+        if (searchClear) searchClear.style.display = searchInput.value.trim() ? '' : 'none';
+        // Debounce so we don't re-render on every keystroke
+        clearTimeout(_searchTimer);
+        _searchTimer = setTimeout(function() {
+          if (typeof renderSavedClients === 'function') renderSavedClients();
+        }, 120);
+      });
+    }
+    if (searchClear) {
+      searchClear.addEventListener('click', function() {
+        if (searchInput) searchInput.value = '';
+        searchClear.style.display = 'none';
+        if (typeof renderSavedClients === 'function') renderSavedClients();
+        if (searchInput) searchInput.focus();
+      });
+    }
 
     migClose.addEventListener('click', function() { migModal.style.display = 'none'; });
     migModal.addEventListener('click', function(e) { if (e.target === migModal) migModal.style.display = 'none'; });
