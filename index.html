@@ -1035,6 +1035,7 @@ window.ODC_CLOUD = (function() {
       <button class="mini-btn" id="btnUpdates" title="View change history & add new updates">📋 Updates <span id="btnUpdatesBadge" style="display:none;background:#b85a3a;color:#fff;border-radius:999px;padding:1px 6px;font-size:10px;margin-left:4px;font-weight:700">0</span></button>
       <button class="mini-btn" id="btnInterim" title="Quick interim care plan" style="display:none">📝 Interim CP</button>
       <button class="mini-btn" id="btnQuickPdf" title="Download the entire care plan as a PDF (no selection needed)">📥 PDF</button>
+      <button class="mini-btn" id="btnEmailCoord" title="Email the care plan to this client's coordinator">📧 Email</button>
       <button class="mini-btn primary" id="btnPrint">🖨 Print…</button>
     </div>
   </div>
@@ -4090,12 +4091,10 @@ async function executeSavePdf() {
 }
 document.getElementById('btnPrintPdf').addEventListener('click', executeSavePdf);
 
-/* Quick PDF — one-click toolbar shortcut. Includes ALL available sections, no picker. */
-async function executeQuickPdf() {
-  if (typeof html2pdf === 'undefined') {
-    alert('PDF library is still loading. Please wait a moment and try again.');
-    return;
-  }
+/* Quick PDF — one-click toolbar shortcut. Pre-selects ALL items and triggers the browser
+   print dialog. User chooses "Save as PDF" as the destination. This is more reliable than
+   html2canvas-based PDF generation, which struggles with form fields and signatures. */
+function executeQuickPdf() {
   // Make sure care plan content is rendered (so its sections are in DOM and selectable)
   if (state.mode === 'new' || state.mode === 'annual') {
     if (state.currentStep !== 'careplan') renderCarePlan();
@@ -4105,50 +4104,88 @@ async function executeQuickPdf() {
     alert('Nothing to export yet — start filling in the assessment first.');
     return;
   }
-
   // Mark all items as included
   document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
   items.forEach(it => { if (it.target) it.target.classList.add('print-include'); });
   document.querySelectorAll('.step-panel').forEach(p => p.classList.add('active'));
   document.body.classList.add('print-filter');
-  document.body.classList.add('pdf-export');
 
+  // Set the document title — many browsers use this as the default PDF filename
   const safeName = (state.data.p_name || 'client').replace(/[^a-zA-Z0-9가-힣]+/g, '_').replace(/^_|_$/g, '') || 'client';
   const dateStr = new Date().toISOString().slice(0, 10);
-  const filename = 'ODC_CarePlan_' + safeName + '_' + dateStr + '.pdf';
+  const origTitle = document.title;
+  document.title = 'ODC_CarePlan_' + safeName + '_' + dateStr;
 
-  const btn = document.getElementById('btnQuickPdf');
-  const orig = btn.textContent;
-  btn.disabled = true;
-  btn.textContent = '⏳ Generating PDF…';
-
-  await new Promise(r => setTimeout(r, 100));
-
-  try {
-    await html2pdf()
-      .set({
-        margin:      [10, 8, 10, 8],
-        filename:    filename,
-        image:       { type: 'jpeg', quality: 0.95 },
-        html2canvas: { scale: 2, useCORS: true, logging: false, windowWidth: 1024 },
-        jsPDF:       { unit: 'mm', format: 'a4', orientation: 'portrait', compress: true },
-        pagebreak:   { mode: ['css', 'legacy'] }
-      })
-      .from(document.getElementById('appMain'))
-      .save();
-  } catch (err) {
-    console.error('Quick PDF failed:', err);
-    alert('PDF generation failed: ' + (err.message || err));
-  } finally {
-    document.body.classList.remove('print-filter');
-    document.body.classList.remove('pdf-export');
-    document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
-    document.querySelectorAll('.step-panel').forEach(p => p.classList.toggle('active', p.dataset.step === state.currentStep));
-    btn.disabled = false;
-    btn.textContent = orig;
-  }
+  setTimeout(() => {
+    window.print();
+    setTimeout(() => {
+      document.body.classList.remove('print-filter');
+      document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
+      document.querySelectorAll('.step-panel').forEach(p => p.classList.toggle('active', p.dataset.step === state.currentStep));
+      document.title = origTitle;
+    }, 600);
+  }, 60);
 }
 document.getElementById('btnQuickPdf').addEventListener('click', executeQuickPdf);
+
+/* Email coordinator — opens user's email client with To/Subject/Body prefilled.
+   Per-client coordinator email is remembered in state.data.coordinator_email. */
+function executeEmailCoordinator() {
+  if (!state.mode) { alert('Open a client first.'); return; }
+
+  // Get / prompt for coordinator email (stored per-client)
+  let toEmail = (state.data.coordinator_email || '').trim();
+  const promptMsg = toEmail
+    ? 'Coordinator email for ' + (state.data.p_name || 'this client') + ':'
+    : 'Enter coordinator email for ' + (state.data.p_name || 'this client') + '\n(Saved with the client — only need to enter once.)';
+  const entered = prompt(promptMsg, toEmail);
+  if (entered === null) return; // user cancelled
+  toEmail = entered.trim();
+  if (!toEmail) { alert('Email is required.'); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(toEmail)) {
+    alert('That doesn\'t look like a valid email address.');
+    return;
+  }
+  // Save for next time
+  if (state.data.coordinator_email !== toEmail) {
+    state.data.coordinator_email = toEmail;
+    autoSave();
+  }
+
+  // Compose email
+  const clientName = (state.data.p_name || '').trim() || '(unnamed client)';
+  const dateStr = new Date().toLocaleDateString(undefined, { day:'numeric', month:'long', year:'numeric' });
+  const me = (typeof ODC_CLOUD !== 'undefined' && ODC_CLOUD.getUser && ODC_CLOUD.getUser()) || {};
+  const fromName = me.name || me.email || 'ODC Care Team';
+  const subject = 'Care Plan — ' + clientName + ' (' + dateStr + ')';
+  const body =
+    'Hi,\n\n' +
+    'Please find the latest Care Plan for ' + clientName + ' attached.\n\n' +
+    'Summary:\n' +
+    '  • Mode: ' + (state.mode === 'annual' ? 'Annual Review' : 'New Client / Care Plan') + '\n' +
+    '  • DOB: ' + (state.data.p_dob || '—') + '\n' +
+    '  • Diagnosis: ' + (state.data.med_diagnosis || '—') + '\n' +
+    '  • Allergies: ' + (state.data.med_allergies || '—') + '\n\n' +
+    'Note: please attach the PDF (downloaded just now to your Downloads folder) before sending.\n\n' +
+    'Kind regards,\n' +
+    fromName + '\n' +
+    'One Dream Community';
+
+  const mailtoUrl = 'mailto:' + encodeURIComponent(toEmail) +
+                    '?subject=' + encodeURIComponent(subject) +
+                    '&body=' + encodeURIComponent(body);
+
+  // Trigger PDF download FIRST so it lands in Downloads, then open the email
+  if (confirm('Download the PDF now and open your email app?\n\n' +
+              'To: ' + toEmail + '\n' +
+              'Subject: ' + subject + '\n\n' +
+              'After saving the PDF, your email will open with the message prefilled — just attach the downloaded PDF and send.')) {
+    executeQuickPdf();
+    // Open mailto after the print dialog (user closes it first)
+    setTimeout(() => { window.location.href = mailtoUrl; }, 1500);
+  }
+}
+document.getElementById('btnEmailCoord').addEventListener('click', executeEmailCoordinator);
 function updatePrintCount() {
   const n = document.querySelectorAll('#printList input[type="checkbox"]:checked').length;
   const total = document.querySelectorAll('#printList input[type="checkbox"]').length;
