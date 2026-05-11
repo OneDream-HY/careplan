@@ -682,6 +682,15 @@ window.ODC_CLOUD = (function() {
 
   /* saved clients list on mode picker */
   .saved-list { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 14px; }
+  /* When the saved-clients list gets long, contain it with internal scroll
+     so the "Start new" buttons below stay visible. */
+  #modePicker .modal { display: flex; flex-direction: column; max-height: 92vh; }
+  #modePicker .saved-list { flex: 1 1 auto; overflow-y: auto; min-height: 80px; max-height: 50vh; }
+  #modePicker > * > h2,
+  #modePicker > * > p,
+  #modePicker > * > #migrateBanner,
+  #modePicker > * > .mode-grid,
+  #modePicker > * > h3 { flex: 0 0 auto; }
   .saved-list h3 { margin: 0 0 8px 0; font-size: 16px; color: var(--ink-soft); }
   .saved-list .empty { color: var(--ink-muted); font-size: 13px; }
   .saved-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; margin-bottom: 6px; background: #fff; cursor: pointer; transition: all .15s; }
@@ -4133,10 +4142,14 @@ if (_activeId && loadClient(_activeId) && state.mode) {
     loadClient = function(id) {
       const cache = ODC_CLOUD.clientCache;
       if (!cache[id]) return false;
+      const entry = cache[id];
       state = Object.assign(
         { mode: null, currentStep: null, data: {}, selectedTools: {}, manualTools: {}, carePlan: {}, updates: [] },
-        cache[id].state
+        entry.state || {}
       );
+      // Fallbacks for older saved data where mode/currentStep weren't always inside state
+      if (!state.mode && entry.mode) state.mode = entry.mode;
+      if (!state.currentStep) state.currentStep = (state.mode === 'annual' ? 'annual' : 'initial');
       if (!Array.isArray(state.updates)) state.updates = [];
       setActiveClient(id);
       // Refresh updates badge for the newly loaded client
