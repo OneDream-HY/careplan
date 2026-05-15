@@ -1747,9 +1747,9 @@ function buildInitialAssessment() {
     <div style="margin-top:6px"><label class="field"><span>Equipment used</span>${checks('hyg_equip',['Shower chair','Toilet frame','Commode chair','Other'],{cols:3})}</label></div>
     <div style="margin-top:6px">${txt('hyg_equip_other','Equipment — detail')}</div>
     <h3 style="margin-top:12px">Oral health</h3>
-    <div class="grid two">
-      ${sel('ia_dentures','Dentures',['No','Full upper','Full lower','Partial upper','Partial lower','Both full'])}
-      ${sel('hyg_own_teeth','Own teeth',['No','Full upper','Full lower','Partial upper','Partial lower','Both full'])}
+    <div style="margin-top:6px"><label class="field"><span>Dentures <em style="font-weight:normal;color:var(--ink-soft)">— select up to 2 (e.g. Partial upper + Full lower)</em></span>${checks('hyg_dentures',['No','Full upper','Full lower','Partial upper','Partial lower','Partial upper and lower','Both full'],{cols:3})}</label></div>
+    <div style="margin-top:6px"><label class="field"><span>Own teeth <em style="font-weight:normal;color:var(--ink-soft)">— select up to 2</em></span>${checks('hyg_own_teeth',['No','Full upper','Full lower','Partial upper','Partial lower','Partial upper and lower','Both full'],{cols:3})}</label></div>
+    <div class="grid two" style="margin-top:6px">
       ${sel('hyg_dent_fit','Do dentures fit well?',['Yes','No'])}
       ${sel('hyg_gums','Gums, buccal mucosa, tongue pink and moist?',['Yes','No'])}
       ${sel('hyg_lesions','Any lesions on gums, mucosa, tongue?',['Yes','No'])}
@@ -2067,9 +2067,10 @@ function buildInitialAssessment() {
   <!-- ---- 14. Advanced Care Directive ---- -->
   <div class="card">
     <h2>14 · Advanced Care Directive</h2>
+    <p class="subtitle" style="margin-top:-2px;font-size:12px">Linked with Annual Ax & Care Plan — changes here flow to all three.</p>
     <div class="grid two">
-      ${sel('ia_acd','Does consumer have Advanced Care Directive in place',['Yes','No','ACD Form (NSW)'])}
-      ${txt('ia_acd_date','ACD date',{type:'date'})}
+      ${sel('acd_have','Does consumer have Advanced Care Directive in place',['Yes','No','ACD Form (NSW)'])}
+      ${txt('acd_date','ACD date',{type:'date'})}
       ${sel('acd_provide_copy','Consumer would like to provide a copy',['Yes','No'])}
       ${sel('acd_more_info','Consumer would like more information',['Yes','No'])}
     </div>
@@ -2080,12 +2081,24 @@ function buildInitialAssessment() {
   <!-- ---- Sign-off ---- -->
   <div class="card">
     <h2>Sign-off</h2>
+    <h3 style="margin-top:8px">Participant / Representative</h3>
     <div class="grid two">
-      ${txt('rn_name','Representative name')}
-      ${txt('rn_date','Date',{type:'date'})}
+      ${txt('participant_name','Participant / Representative name')}
+      ${txt('participant_date','Date',{type:'date'})}
     </div>
-    <div style="margin-top:10px">${sig('rn_signature','Signature')}</div>
-    <div style="margin-top:10px">${sel('signoff_copy','Copy provided',['Yes','No'])}</div>
+    <div style="margin-top:10px">${sig('participant_signature','Participant / Representative signature')}</div>
+
+    <h3 style="margin-top:18px">Registered Nurse</h3>
+    <div class="grid two">
+      ${txt('rn_name','Registered Nurse name')}
+      ${txt('rn_date','Assessment date',{type:'date'})}
+    </div>
+    <div class="grid two" style="margin-top:6px">
+      ${txt('rn_ahpra','AHPRA registration #')}
+    </div>
+    <div style="margin-top:10px">${sig('rn_signature','RN signature')}</div>
+
+    <div style="margin-top:14px">${sel('signoff_copy','Copy provided to participant',['Yes','No'])}</div>
   </div>
   `;
 }
@@ -2223,17 +2236,18 @@ function buildAnnualAssessment() {
       ${sel('an_home_support','Support required',['Independent','Family','Support worker','Nil'])}
       ${sel('an_repairs','Minor repairs / maintenance',['Yes','No'])}
       ${sel('an_geo_isolated','Geographically isolated',['Yes','No'])}
-      ${sel('an_transport','Transport assistance',['None','Family','Friends','Community transport','Taxi','Support worker'])}
     </div>
+    <div style="margin-top:6px"><label class="field"><span>Transport assistance <em style="font-weight:normal;color:var(--ink-soft)">— select all that apply</em></span>${checks('an_transport',['None','Family','Friends','Community transport','Taxi','Support worker'],{cols:3})}</label></div>
     <div style="margin-top:6px">${ta('an_social_notes','Notes / family interaction / clubs / religion')}</div>
   </div>
 
   <div class="card">
     <h2>Part 9 · Advanced care directive</h2>
+    <p class="subtitle" style="margin-top:-2px;font-size:12px">Linked with Initial Ax & Care Plan — changes here flow to all three.</p>
     <div class="grid two">
-      ${sel('an_acd','ACD in place',['Yes','No','ACD form (NSW) provided'])}
-      ${sel('an_acd_copy','Copy on file',['Yes','No'])}
-      ${sel('an_acd_info','Wants more info',['Yes','No'])}
+      ${sel('acd_have','ACD in place',['Yes','No','ACD Form (NSW)'])}
+      ${sel('acd_provide_copy','Copy on file',['Yes','No'])}
+      ${sel('acd_more_info','Wants more info',['Yes','No'])}
     </div>
   </div>
 
@@ -2452,7 +2466,7 @@ const ASSESSMENTS = {
       ${sel('frat_foot','Footwear / foot problems',['0 None','1 Ill-fitting shoes','2 Wounds / painful feet','3 Neuropathy / contractures'])}
       ${sel('frat_drug','Drug & alcohol',['0 Nil','1 Mild','2 Moderate','3 Heavy regular'])}
       ${sel('frat_env','Environment',['0 Nil dangers','1 One risk','2 Two risks','3 Multiple risks'])}
-      ${txt('frat_total','Total FRAT score',{type:'number'})}
+      <label class="field"><span>Total FRAT score <em style="font-weight:normal;color:var(--ink-soft)">— auto-calculated</em></span><input type="number" data-key="frat_total" data-frat-total="1" readonly style="background:#f4f6ee;font-weight:600"/></label>
     </div>
     ${signoff('frat')}
   `,
@@ -2538,9 +2552,9 @@ const ASSESSMENTS = {
     </div>
     <div style="margin-top:6px"><label class="field"><span>Equipment used</span>${checks('hyg_equip',['Shower chair','Toilet frame','Commode chair','Other'],{cols:3})}</label></div>
     <h3 style="margin-top:14px">Oral care</h3>
-    <div class="grid two">
-      ${sel('hyg_dentures','Dentures',['No','Full upper','Full lower','Partial upper','Partial lower','Both full'])}
-      ${sel('hyg_own_teeth','Own teeth',['No','Full upper','Full lower','Partial upper','Partial lower','Both full'])}
+    <div style="margin-top:6px"><label class="field"><span>Dentures <em style="font-weight:normal;color:var(--ink-soft)">— select up to 2 (linked with Personal Hygiene Ax)</em></span>${checks('hyg_dentures',['No','Full upper','Full lower','Partial upper','Partial lower','Partial upper and lower','Both full'],{cols:3})}</label></div>
+    <div style="margin-top:6px"><label class="field"><span>Own teeth <em style="font-weight:normal;color:var(--ink-soft)">— select up to 2 (linked with Personal Hygiene Ax)</em></span>${checks('hyg_own_teeth',['No','Full upper','Full lower','Partial upper','Partial lower','Partial upper and lower','Both full'],{cols:3})}</label></div>
+    <div class="grid two" style="margin-top:6px">
       ${sel('hyg_oral_level','Oral care level',['Independent','Supervision','Some Assistance','Full Assistance'])}
     </div>
     <div style="margin-top:6px"><label class="field"><span>Toothbrush</span>${checks('hyg_brush',['Manual','Electric','Ordinary toothpaste','Specific toothpaste'],{cols:2})}</label></div>
@@ -2593,8 +2607,8 @@ const ASSESSMENTS = {
       ${sel('ch_interpreter','Interpreter required',['Yes','No'])}
       ${ta('ch_devices','Special communication devices')}
       ${txt('ch_consult_with','Consultation with whom')}
-      ${txt('ch_nok','Next of kin')}${txt('ch_nok_phone','NOK contact')}
-      ${txt('ch_gp','GP name & medical centre')}
+      ${txt('nok1_name','Next of kin (1st NOK)')}${txt('nok1_phone','NOK contact')}
+      ${txt('gp_name','GP name & medical centre')}${txt('gp_phone','GP contact')}
       ${txt('ch_specialist','Specialist name')}
     </div>
     <h3 style="margin-top:14px">Cardiovascular / Respiratory</h3>
@@ -3020,6 +3034,10 @@ function onInput(el) {
   }
   // BMI auto-calc
   if (key === 'p_weight' || key === 'p_height' || key === 'ia_weight' || key === 'ia_height' || key === 'an_weight' || key === 'an_height' || key === 'nu_weight' || key === 'nu_height' || key === 'ch_weight' || key === 'ch_height') autoBMI();
+  // FRAT total auto-calc — recompute whenever any frat_ sub-score changes
+  if (FRAT_SCORE_KEYS.indexOf(key) !== -1) autoFRAT();
+  // Mirror linked fields (NOK, GP, ACD, dentures, teeth) into any other rendered forms
+  if (LINKED_KEYS.indexOf(key) !== -1) mirrorLinkedField(key, val);
   // Only recompute auto-tools when a trigger key changes (prevents focus theft while typing in normal fields).
   if (Object.prototype.hasOwnProperty.call(AUTO_TRIGGERS, key)) recomputeAutoTools();
   autoSave();
@@ -3027,10 +3045,40 @@ function onInput(el) {
 function onCheckGroup(el) {
   const k = el.dataset.cgkey;
   const arr = state.data[k] && Array.isArray(state.data[k]) ? state.data[k].slice() : [];
-  if (el.checked) { if (!arr.includes(el.value)) arr.push(el.value); }
+  if (el.checked) {
+    // Cap dentures/own-teeth at 2 selections (e.g. one upper + one lower).
+    // Picking "No", "Both full", or "Partial upper and lower" clears the rest
+    // (they are self-sufficient single-answers).
+    if (k === 'hyg_dentures' || k === 'hyg_own_teeth') {
+      const exclusive = ['No','Both full','Partial upper and lower'];
+      if (exclusive.indexOf(el.value) !== -1) {
+        arr.length = 0;
+      } else {
+        // If an exclusive option is already selected, drop it
+        for (let i = arr.length - 1; i >= 0; i--) {
+          if (exclusive.indexOf(arr[i]) !== -1) arr.splice(i, 1);
+        }
+        if (arr.length >= 2) {
+          // Already at cap — refuse this tick
+          el.checked = false;
+          alert('You can select up to 2 options (e.g. one upper + one lower). Untick an existing option first.');
+          return;
+        }
+      }
+    }
+    if (!arr.includes(el.value)) arr.push(el.value);
+  }
   else { const i = arr.indexOf(el.value); if (i>-1) arr.splice(i,1); }
   state.data[k] = arr;
   el.closest('.chk').classList.toggle('checked', el.checked);
+  // Re-sync sibling checkboxes in the same group (in case we cleared/reset above)
+  el.closest('[data-cgroup]').querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    const on = arr.includes(cb.value);
+    cb.checked = on;
+    cb.closest('.chk').classList.toggle('checked', on);
+  });
+  // Mirror linked check-groups (dentures/own teeth shared across forms, etc.)
+  if (LINKED_CHECK_GROUPS.indexOf(k) !== -1) mirrorLinkedCheckGroup(k, arr);
   autoSave();
 }
 function onRadioGroup(el) {
@@ -3051,6 +3099,58 @@ function autoBMI() {
       const f = document.querySelector(`[data-key="${b}"]`);
       if (f) f.value = bmi;
     }
+  });
+}
+
+/* ---------- FRAT total auto-calc ---------- */
+// Each FRAT sub-score option starts with its numeric weight (e.g. "2 Ambulates with assist device").
+// We extract the leading integer of each selected option and sum them.
+const FRAT_SCORE_KEYS = [
+  'frat_falls_hx','frat_balance','frat_mental','frat_general','frat_vision',
+  'frat_hearing','frat_speech','frat_meds','frat_age','frat_chronic',
+  'frat_inc','frat_foot','frat_drug','frat_env'
+];
+function autoFRAT() {
+  let total = 0, any = false;
+  FRAT_SCORE_KEYS.forEach(k => {
+    const v = state.data[k];
+    if (v == null || v === '') return;
+    const m = String(v).match(/^(\d+)/);
+    if (m) { total += parseInt(m[1], 10); any = true; }
+  });
+  state.data.frat_total = any ? total : '';
+  document.querySelectorAll('[data-key="frat_total"]').forEach(f => { f.value = any ? total : ''; });
+}
+
+/* ---------- Linked-field mirroring ---------- */
+// Fields with these keys appear in more than one form (Initial Ax, Annual Ax,
+// Comprehensive Ax, Care Plan). state.data is the single source of truth, but
+// since rendered DOM inputs are NOT shared, we proactively update any other
+// inputs on the page that share the same data-key when one is edited.
+const LINKED_KEYS = [
+  // NOK & GP linked across Initial / Annual / Comprehensive Ax
+  'nok1_name','nok1_phone','nok1_rel','nok1_email','nok1_epoa','nok1_evidence',
+  'nok2_name','nok2_phone','nok2_rel','nok2_email','nok2_epoa','nok2_evidence',
+  'gp_name','gp_phone',
+  // Advanced Care Directive linked across Initial Ax, Annual Ax, Care Plan
+  'acd_have','acd_date','acd_provide_copy','acd_more_info',
+  // Oral health (denture / own teeth) linked between Personal Hygiene Ax and Comprehensive Ax
+  // (these are check-group arrays — handled by mirrorLinkedCheckGroup below)
+];
+const LINKED_CHECK_GROUPS = ['hyg_dentures','hyg_own_teeth','an_transport','ia_transport_used'];
+function mirrorLinkedField(key, val) {
+  document.querySelectorAll(`[data-key="${key}"]`).forEach(other => {
+    if (other.type === 'checkbox') { other.checked = !!val; other.closest('.chk')?.classList.toggle('checked', !!val); }
+    else if (other.value !== val) other.value = val;
+  });
+}
+function mirrorLinkedCheckGroup(group, arr) {
+  document.querySelectorAll(`[data-cgroup="${group}"]`).forEach(g => {
+    g.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      const on = Array.isArray(arr) && arr.includes(cb.value);
+      cb.checked = on;
+      cb.closest('.chk').classList.toggle('checked', on);
+    });
   });
 }
 function applyState(scope) {
@@ -3341,11 +3441,12 @@ function buildCarePlan() {
       ${ta('cp_peep_evac','Evacuation plan')}
     </div>
     <h3 style="margin-top:14px">Advanced Care Directive / End-of-life care plan</h3>
+    <p class="subtitle" style="margin-top:-2px;font-size:12px">Linked with Initial & Annual Ax — changes here flow to all three.</p>
     <div class="grid two">
-      ${sel('cp_acd_have','ACD in place',['Yes','No','ACD Form (NSW)'])}
+      ${sel('acd_have','ACD in place',['Yes','No','ACD Form (NSW)'])}
       ${sel('cp_eol_have','End-of-life care plan in place',['Yes','No'])}
-      ${sel('cp_acd_copy','Consumer would like to provide a copy',['Yes','No'])}
-      ${sel('cp_acd_info','Wants more information',['Yes','No'])}
+      ${sel('acd_provide_copy','Consumer would like to provide a copy',['Yes','No'])}
+      ${sel('acd_more_info','Wants more information',['Yes','No'])}
     </div>
   </div>
 
