@@ -845,9 +845,24 @@ window.ODC_CLOUD = (function() {
     .step-panel { display: block !important; padding: 0; }
 
     /* card / ax-block — solid green border + faint tint header */
-    .card, .ax-block { box-shadow: none !important; border: 1.5px solid #4a7a3c !important; background: #fff !important; break-inside: avoid; page-break-inside: avoid; padding: 12px 14px; margin-bottom: 10px; border-radius: 4px; }
+    .card, .ax-block { box-shadow: none !important; border: 1.5px solid #4a7a3c !important; background: #fff !important; padding: 12px 14px; margin-bottom: 10px; border-radius: 4px; }
+    /* ax-blocks (individual assessments) stay together as one logical document each */
+    .ax-block { break-inside: avoid; page-break-inside: avoid; }
+    /* Initial/Annual Ax cards: allow graceful breaks across pages instead of dumping cards
+       onto a new page and leaving big empty space at the bottom of the previous one.
+       Inner units (fields, check-grids, signatures) still avoid breaking via the rules below. */
+    .card { break-inside: auto; page-break-inside: auto; orphans: 3; widows: 3; }
+    /* Always keep section headings with the content that follows them */
+    .card > h2, .card > h3, .sec-head, .card > .sec-head + *, h2 + *, h3 + * { break-after: avoid; page-break-after: avoid; }
+    /* Keep individual form rows together */
+    label.field, .field, .check-grid, .grid.two, .grid.three, .sig-field, .sig-wrap { break-inside: avoid; page-break-inside: avoid; }
+    /* Section-divider cards ("Activities of Daily Living", "Mental Health & Behavior", "Complex Health Care") —
+       these contain only an <h2>. Compact them into a thin horizontal strip that
+       sticks to the next section instead of consuming a full page. */
+    .card.good { padding: 4px 12px !important; margin: 14px 0 6px !important; border: 0 !important; border-left: 4px solid #3e6a4a !important; border-radius: 0 !important; background: #eaf3eb !important; break-before: avoid; page-break-before: avoid; break-after: avoid; page-break-after: avoid; break-inside: avoid; page-break-inside: avoid; }
+    .card.good > h2 { font-size: 13px !important; margin: 0 !important; color: #2f4a2a !important; font-weight: 600 !important; }
+
     .card.warm { border-color: #a64b2a !important; background: #fbf2ec !important; }
-    .card.good { border-color: #3e6a4a !important; background: #eaf3eb !important; }
     .card.cp-domain { border-width: 2px !important; }
 
     .ax-body.collapsed { display: block !important; }
