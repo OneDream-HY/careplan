@@ -1170,6 +1170,61 @@ window.ODC_CLOUD = (function() {
   #interimEditor .icp-prefill-note { background: var(--accent-light); border-left: 3px solid var(--accent); padding: 8px 12px; font-size: 12.5px; color: var(--accent-deep); border-radius: 0 4px 4px 0; margin-bottom: 12px; }
   #interimEditor .icp-rn-block { background: var(--bg); padding: 12px; border-radius: 6px; margin-top: 12px; }
   #interimEditor .sig-canvas { border: 1px solid var(--line); border-radius: 4px; background: #fff; touch-action: none; cursor: crosshair; width: 100%; height: 100px; }
+
+  /* ---- Annual carry-over banner + changed-field highlight ---- */
+  .carryover-banner {
+    background: linear-gradient(to right, #fff8e1, #fff);
+    border: 1px solid #f0d977;
+    border-left: 4px solid #d4a017;
+    padding: 10px 14px;
+    border-radius: 6px;
+    margin: 0 0 16px;
+    font-size: 13px;
+    color: #6b4e00;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .carryover-banner strong { color: #4a3700; }
+  .carryover-banner .co-dismiss {
+    margin-left: auto;
+    background: transparent;
+    border: 1px solid #d4a017;
+    color: #6b4e00;
+    padding: 4px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12px;
+  }
+  .carryover-banner .co-dismiss:hover { background: #f0d977; }
+  .field-changed,
+  .check-grid.field-changed,
+  .chk.field-changed {
+    position: relative;
+    background: #fff8e1 !important;
+    border-radius: 4px;
+    padding: 2px 6px !important;
+    margin-left: -6px;
+    transition: background 0.2s;
+  }
+  .field-changed::before {
+    content: "● updated";
+    position: absolute;
+    top: 4px;
+    right: 8px;
+    font-size: 10px;
+    color: #c18900;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    pointer-events: none;
+  }
+  /* Don't double-mark check-grids — only mark the outer container */
+  .field-changed .chk.field-changed,
+  .field-changed .check-grid.field-changed { background: transparent !important; }
+  .field-changed .chk.field-changed::before,
+  .field-changed .check-grid.field-changed::before { display: none; }
+  @media print { .field-changed { background: transparent !important; } .field-changed::before, .carryover-banner { display: none !important; } }
 </style>
 <div class="modal-bg no-print" id="interimEditor" style="display:none">
   <div class="modal icp-modal">
@@ -1471,7 +1526,10 @@ let state = {
   data: {},                   // all field values keyed by data-key
   selectedTools: {},          // { toolId: true }
   manualTools: {},            // { toolId: true } -> manually toggled on
-  carePlan: {}                // care plan editable rows
+  carePlan: {},               // care plan editable rows
+  carriedOver: null,          // snapshot of data carried over from previous review (null if not a carry-over)
+  carriedOverFrom: null,      // { name, date } of source record
+  previousReviewId: null      // id of the client record this was carried over from
 };
 
 /* ---------- field rendering helpers ---------- */
@@ -3038,6 +3096,8 @@ function onInput(el) {
   if (FRAT_SCORE_KEYS.indexOf(key) !== -1) autoFRAT();
   // Mirror linked fields (NOK, GP, ACD, dentures, teeth) into any other rendered forms
   if (LINKED_KEYS.indexOf(key) !== -1) mirrorLinkedField(key, val);
+  // Annual carry-over: re-evaluate change highlight for this field
+  if (state.carriedOver) markFieldChanged(key);
   // Only recompute auto-tools when a trigger key changes (prevents focus theft while typing in normal fields).
   if (Object.prototype.hasOwnProperty.call(AUTO_TRIGGERS, key)) recomputeAutoTools();
   autoSave();
@@ -3079,12 +3139,15 @@ function onCheckGroup(el) {
   });
   // Mirror linked check-groups (dentures/own teeth shared across forms, etc.)
   if (LINKED_CHECK_GROUPS.indexOf(k) !== -1) mirrorLinkedCheckGroup(k, arr);
+  // Annual carry-over: re-evaluate change highlight for this group
+  if (state.carriedOver) markFieldChanged(k);
   autoSave();
 }
 function onRadioGroup(el) {
   state.data[el.dataset.rgkey] = el.value;
   el.closest('[data-rgroup]').querySelectorAll('.chk').forEach(c => c.classList.remove('checked'));
   el.closest('.chk').classList.add('checked');
+  if (state.carriedOver) markFieldChanged(el.dataset.rgkey);
   autoSave();
 }
 function autoBMI() {
@@ -3153,6 +3216,157 @@ function mirrorLinkedCheckGroup(group, arr) {
     });
   });
 }
+
+/* ---------- Annual carry-over ---------- */
+// Fields that should be CLEARED when a previous record is carried over into a
+// new Annual Review. Each year these need to be re-entered/re-signed.
+const ANNUAL_RESET_KEYS_BASE = [
+  // Initial AX final sign-off
+  'participant_name','participant_date','participant_signature',
+  'rn_name','rn_date','rn_signature',
+  'signoff_copy',
+  // ACD date (other ACD answers carry over; only the date is re-set each review)
+  'acd_date',
+  // Care Plan signatures
+  'cp_sig_participant_name','cp_sig_participant_date','cp_sig_participant',
+  'cp_sig_rn_name','cp_sig_rn_date','cp_sig_rn',
+  // Interim Care Plan sign-off
+  'icp_rn_name','icp_rn_date','icp_rn_sig',
+  // Annual AX-specific
+  'an_copy_provided',
+];
+// Per-tool sign-offs: pain_rn / pain_date / pain_sig, etc.
+const _TOOL_IDS = ['pain','skin','wound','continence','mna','nutrition','diabetes','catheter','frat','mobility','behaviour','medications','hygiene','palliative','comprehensive','communication'];
+const ANNUAL_RESET_KEYS = ANNUAL_RESET_KEYS_BASE.concat(
+  _TOOL_IDS.flatMap(t => [`${t}_rn`, `${t}_date`, `${t}_sig`])
+);
+
+// Build a deep copy of an object — sufficient for the JSON-safe values used in state.data.
+function _deepCopy(o) { return o == null ? o : JSON.parse(JSON.stringify(o)); }
+
+// Compare two field values (strings, arrays, numbers) for the change-highlight.
+function _valuesDiffer(a, b) {
+  if (a == null && b == null) return false;
+  if (a == null || b == null) {
+    // Treat empty string / empty array / 0 same as null
+    const aEmpty = a == null || a === '' || (Array.isArray(a) && a.length === 0) || a === 0;
+    const bEmpty = b == null || b === '' || (Array.isArray(b) && b.length === 0) || b === 0;
+    return !(aEmpty && bEmpty);
+  }
+  return JSON.stringify(a) !== JSON.stringify(b);
+}
+
+// Highlight (or un-highlight) the container of a field when its current value
+// differs from the carried-over baseline. Called on input and on render.
+function markFieldChanged(key) {
+  if (!state.carriedOver) return;
+  const baseline = state.carriedOver[key];
+  const current = state.data[key];
+  const changed = _valuesDiffer(baseline, current);
+
+  // Plain inputs / selects / textareas — highlight closest .field wrapper
+  document.querySelectorAll(`[data-key="${key}"]`).forEach(el => {
+    const wrap = el.closest('.field') || el.closest('.chk') || el.parentElement;
+    if (wrap) wrap.classList.toggle('field-changed', changed);
+  });
+  // Check-groups — highlight the data-cgroup wrapper (also its .field parent if any)
+  document.querySelectorAll(`[data-cgroup="${key}"]`).forEach(el => {
+    const wrap = el.closest('.field') || el;
+    wrap.classList.toggle('field-changed', changed);
+  });
+  // Radio groups
+  document.querySelectorAll(`[data-rgroup="${key}"]`).forEach(el => {
+    const wrap = el.closest('.field') || el;
+    wrap.classList.toggle('field-changed', changed);
+  });
+}
+
+// Re-evaluate every carry-over key in the current scope and apply highlights.
+function applyChangeHighlights(scope) {
+  if (!state.carriedOver) return;
+  scope = scope || document;
+  // Collect unique keys present in this scope
+  const keys = new Set();
+  scope.querySelectorAll('[data-key]').forEach(el => keys.add(el.dataset.key));
+  scope.querySelectorAll('[data-cgroup]').forEach(el => keys.add(el.dataset.cgroup));
+  scope.querySelectorAll('[data-rgroup]').forEach(el => keys.add(el.dataset.rgroup));
+  keys.forEach(k => markFieldChanged(k));
+}
+
+// Render (or remove) the carry-over banner at the top of appMain.
+function renderCarryoverBanner() {
+  const main = document.getElementById('appMain');
+  if (!main) return;
+  let banner = document.getElementById('carryoverBanner');
+  if (!state.carriedOver) { if (banner) banner.remove(); return; }
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'carryoverBanner';
+    banner.className = 'carryover-banner no-print';
+    main.insertBefore(banner, main.firstChild);
+  }
+  const src = state.carriedOverFrom || {};
+  const srcName = src.name ? ` from <strong>${String(src.name).replace(/[<>]/g,'')}</strong>` : '';
+  const srcDate = src.date ? ` (last saved ${String(src.date).replace(/[<>]/g,'')})` : '';
+  banner.innerHTML = `<span>📋</span><span>Last year\u2019s data carried over${srcName}${srcDate}. Edit any field — <strong>changes are highlighted in yellow</strong>. Signatures &amp; dates have been cleared and must be re-entered.</span><button type="button" class="co-dismiss" title="Stop tracking changes for this review">Stop tracking</button>`;
+  banner.querySelector('.co-dismiss').onclick = () => {
+    if (!confirm('Stop highlighting carried-over fields? This cannot be undone for this record.')) return;
+    state.carriedOver = null;
+    state.carriedOverFrom = null;
+    autoSave();
+    document.querySelectorAll('.field-changed').forEach(el => el.classList.remove('field-changed'));
+    banner.remove();
+  };
+}
+
+// Create a brand-new client record from an existing one's state, ready for a new
+// annual review. Returns the new client id, or null on cancel.
+function startAnnualReviewFrom(sourceId) {
+  const map = readClients();
+  const src = map[sourceId];
+  if (!src) { alert('Source record not found.'); return null; }
+  const srcName = ((src.state && src.state.data && (src.state.data.p_name || src.state.data.p_preferred)) || src.name || 'this client').toString();
+  if (!confirm(`Start a NEW Annual Review for "${srcName}"?\n\nA copy of all current data will be created as a separate record. The original will be preserved unchanged. Signatures and assessment dates will need to be re-entered.`)) {
+    return null;
+  }
+
+  // Deep-copy state, then reset the keys that must be re-entered each review.
+  const newState = {
+    mode: 'annual',
+    currentStep: null,
+    data: _deepCopy(src.state.data) || {},
+    selectedTools: _deepCopy(src.state.selectedTools) || {},
+    manualTools: _deepCopy(src.state.manualTools) || {},
+    carePlan: _deepCopy(src.state.carePlan) || {},
+    carriedOver: null,
+    carriedOverFrom: null,
+    previousReviewId: sourceId
+  };
+  ANNUAL_RESET_KEYS.forEach(k => { newState.data[k] = ''; });
+  // Snapshot AFTER reset → baseline for change detection
+  newState.carriedOver = _deepCopy(newState.data);
+  newState.carriedOverFrom = {
+    name: srcName,
+    date: src.lastSaved ? new Date(src.lastSaved).toISOString().slice(0,10) : ''
+  };
+
+  // Persist as a new record
+  const newId = genClientId();
+  const newEntry = {
+    id: newId,
+    mode: 'annual',
+    state: newState,
+    name: srcName + ' (Annual ' + new Date().getFullYear() + ')',
+    createdAt: Date.now(),
+    lastSaved: Date.now(),
+    createdBy: src.createdBy || '',
+    lastModifiedBy: '',
+    previousReviewId: sourceId
+  };
+  map[newId] = newEntry;
+  writeClients(map);
+  return newId;
+}
 function applyState(scope) {
   scope = scope || document;
   scope.querySelectorAll('[data-key]').forEach(el => {
@@ -3183,6 +3397,11 @@ function applyState(scope) {
       rb.closest('.chk').classList.toggle('checked', on);
     });
   });
+  // Safety: recompute auto-calculated totals on load
+  // (in case data was imported or carried over without the precomputed value)
+  if (scope.querySelector('[data-frat-total]')) autoFRAT();
+  // Re-apply change highlights for carried-over fields (annual review carry-over)
+  applyChangeHighlights(scope);
 }
 
 /* ---------- CARE PLAN v0.3 (full structure) ---------- */
@@ -3695,7 +3914,7 @@ function updateClientChip() {
 function loadClient(id) {
   const map = readClients();
   if (!map[id]) return false;
-  state = Object.assign({mode:null,currentStep:null,data:{},selectedTools:{},manualTools:{},carePlan:{}}, map[id].state);
+  state = Object.assign({mode:null,currentStep:null,data:{},selectedTools:{},manualTools:{},carePlan:{},carriedOver:null,carriedOverFrom:null,previousReviewId:null}, map[id].state);
   setActiveClient(id);
   return true;
 }
@@ -3722,7 +3941,7 @@ function importJSON(file) {
   r.onload = ev => {
     try {
       const obj = JSON.parse(ev.target.result);
-      state = Object.assign({mode:null,currentStep:null,data:{},selectedTools:{},manualTools:{},carePlan:{}}, obj);
+      state = Object.assign({mode:null,currentStep:null,data:{},selectedTools:{},manualTools:{},carePlan:{},carriedOver:null,carriedOverFrom:null,previousReviewId:null}, obj);
       // Save as a new client slot
       activeClientId = genClientId();
       autoSave();
@@ -3801,6 +4020,7 @@ function renderSavedClients() {
       <div class="sr-meta"><strong>${safe}</strong><small>${meta}</small></div>
       <span class="sr-mode ${c.mode==='annual'?'annual':''}">${c.mode === 'annual' ? 'Annual Review' : 'New Client'}</span>
       <button type="button" data-resume="${c.id}">Resume →</button>
+      <button type="button" data-annual="${c.id}" title="Create a new Annual Review for next year, carrying over this year's data" style="background:#fff8e1;border:1px solid #d4a017;color:#6b4e00">Start annual review →</button>
       <button type="button" data-delete="${c.id}" title="Delete this saved client">✕</button>
     </div>`;
   }).join('');
@@ -3808,6 +4028,17 @@ function renderSavedClients() {
     e.stopPropagation();
     const id = e.target.dataset.resume;
     if (loadClient(id)) {
+      hideMidPicker();
+      showAppShell();
+      initApp();
+    }
+  }));
+  root.querySelectorAll('[data-annual]').forEach(b => b.addEventListener('click', e => {
+    e.stopPropagation();
+    const srcId = e.target.dataset.annual;
+    const newId = startAnnualReviewFrom(srcId);
+    if (!newId) return;
+    if (loadClient(newId)) {
       hideMidPicker();
       showAppShell();
       initApp();
@@ -4361,6 +4592,7 @@ function initApp() {
   renderAnnualAdjuncts();
   renderAxBlocks();
   buildStepper();
+  renderCarryoverBanner();
   goTo(state.currentStep);
 }
 
