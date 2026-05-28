@@ -766,14 +766,27 @@ window.ODC_CLOUD = (function() {
   .sig-tools button { background: transparent; border: 1px solid var(--line); color: var(--ink-soft); padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 11.5px; }
   .sig-tools button:hover { border-color: var(--accent); color: var(--accent); }
   .sig-status.signed { color: var(--good); }
-  .sig-print-img { display: none; max-height: 60px; max-width: 240px; }
+  .sig-print-img { display: none; }
   .sig-print-line { display: none; }
   @media print {
     .sig-canvas { display: none !important; }
     .sig-tools { display: none !important; }
-    .sig-print-img.has-sig { display: block; padding-bottom: 2px; }
-    .sig-print-line { display: block; height: 32px; border-bottom: 1px solid #444; min-width: 240px; max-width: 320px; }
+    /* Signature size in print: the canvas is captured at 600×110, so we render
+       it large enough to actually be readable on paper / PDF. Was 60×240 (way
+       too small — looked like a tick mark). Now 110×360 with auto width so the
+       full stroke shows at proper scale. */
+    .sig-print-img.has-sig {
+      display: block;
+      height: auto !important;
+      max-height: 110px !important;
+      width: auto !important;
+      max-width: 360px !important;
+      min-width: 240px !important;
+      padding-bottom: 2px;
+    }
+    .sig-print-line { display: block; height: 48px; border-bottom: 1px solid #444; min-width: 240px; max-width: 360px; }
     .sig-wrap.has-sig .sig-print-line { display: none; }
+    .sig-wrap { min-height: 56px; }
   }
 
   /* additional assessments wrapper */
