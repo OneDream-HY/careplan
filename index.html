@@ -912,7 +912,32 @@ window.ODC_CLOUD = (function() {
       background: transparent !important; padding: 2px 2px !important; color: #15291a !important;
       box-shadow: none !important; outline: none !important;
     }
-    textarea { min-height: 36px !important; }
+    /* CRITICAL print fix: textareas (and any scrolling fields) must expand to
+       show ALL of their content when printed. Previously, long text was clipped
+       to the on-screen fixed height. The before-print JS handler sets the
+       inline height to scrollHeight; these rules make sure the browser doesn't
+       overlay a scrollbar or clip the overflow. */
+    textarea {
+      min-height: 36px !important;
+      height: auto !important;
+      max-height: none !important;
+      overflow: visible !important;
+      white-space: pre-wrap !important;
+      word-wrap: break-word !important;
+      overflow-wrap: break-word !important;
+      resize: none !important;
+      page-break-inside: auto !important;
+      break-inside: auto !important;
+    }
+    input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="date"], select {
+      overflow: visible !important;
+      white-space: normal !important;
+      text-overflow: clip !important;
+      word-break: break-word !important;
+      height: auto !important;
+    }
+    /* Avoid breaking a field row across a page */
+    label.field { page-break-inside: avoid; break-inside: avoid; }
     select { background-image: none !important; padding-right: 0 !important; appearance: none; }
 
     .page-head { padding: 0; border: 0; margin: 0; }
@@ -1798,8 +1823,13 @@ function buildInitialAssessment() {
       ${sel('nu_adequate','Is current nutrition adequate',['Yes','No'])}
       ${txt('nu_specific_diet','Specific diet — detail')}
     </div>
-    <div style="margin-top:6px"><label class="field"><span>Current diet texture</span>${checks('nu_diet',['Normal chew diet','Minced and moist','Puree','Bite sized'],{cols:2})}</label></div>
-    <div style="margin-top:6px"><label class="field"><span>Fluid texture</span>${checks('nu_fluid',['Thin fluid','Mildly thickened fluid','Moderately thickened fluid','Extremely thickened fluid'],{cols:2})}</label></div>
+    <!-- Diet & Fluid texture: now single-select to match Annual AX and individual
+         Nutrition AX, and to allow real cross-form syncing (see MIRROR_KEY_GROUPS).
+         Options aligned with Nutrition AX so all four forms share the same vocabulary. -->
+    <div class="grid two" style="margin-top:6px">
+      ${sel('nu_diet','Current diet texture',['Normal chew','Soft cut-up','Bite-sized','Minced moist','Puree'])}
+      ${sel('nu_fluid','Fluid texture',['Thin','Mildly thickened','Moderately thickened','Extremely thickened'])}
+    </div>
     <div style="margin-top:6px">${txt('nu_supplements','Supplements used — detail')}</div>
     <div style="margin-top:6px"><label class="field"><span>Referrals & other</span>${checks('nu_referrals',['Swallowing difficulties','Referral to Speech Pathologist','Dentures aids / assistive cutlery required','Enterally fed (PEG / NG)','Referral to Dietitian'],{cols:2})}</label></div>
     <div style="margin-top:6px">${txt('nu_referral_detail','Cutlery aid — detail')}</div>
@@ -2234,8 +2264,10 @@ function buildAnnualAssessment() {
       ${sel('an_weight_change','Weight loss/gain since previous',['No','Yes'])}
     </div>
     <div style="margin-top:6px"><label class="field"><span>Diet & meal prep</span>${checks('an_diet_caps',['Independent','Can prepare light meals','Uses meal delivery','Can heat up meals','Requires assistance heating','Requires meal prep assistance'],{cols:2})}</label></div>
+    <!-- Diet & Fluid texture options aligned with Initial AX, Nutrition AX, and Care Plan
+         so mirrored values match exactly across forms (see MIRROR_KEY_GROUPS). -->
     <div class="grid two" style="margin-top:6px">
-      ${sel('an_diet_texture','Diet texture',['Normal chew','Minced moist','Puree','Bite-sized'])}
+      ${sel('an_diet_texture','Diet texture',['Normal chew','Soft cut-up','Bite-sized','Minced moist','Puree'])}
       ${sel('an_fluid_texture','Fluid texture',['Thin','Mildly thickened','Moderately thickened','Extremely thickened'])}
     </div>
     <div style="margin-top:6px">${ta('an_nutrition_notes','Notes / referrals')}</div>
@@ -3111,6 +3143,8 @@ function onInput(el) {
   if (FRAT_SCORE_KEYS.indexOf(key) !== -1) autoFRAT();
   // Mirror linked fields (NOK, GP, ACD, dentures, teeth) into any other rendered forms
   if (LINKED_KEYS.indexOf(key) !== -1) mirrorLinkedField(key, val);
+  // Cross-key mirroring (height/weight/BMI/diet/fluid/DOR — see MIRROR_KEY_GROUPS)
+  if (MIRROR_KEY_MAP[key]) mirrorAcrossKeyGroup(key, val);
   // Annual carry-over: re-evaluate change highlight for this field
   if (state.carriedOver) markFieldChanged(key);
   // Only recompute auto-tools when a trigger key changes (prevents focus theft while typing in normal fields).
@@ -3166,17 +3200,27 @@ function onRadioGroup(el) {
   autoSave();
 }
 function autoBMI() {
-  // try common pairs
+  /* try common pairs.
+     Because ia_weight / an_weight / nu_weight / ch_weight are all mirrored
+     (and same for height), updating any one of them propagates to the others
+     via mirrorAcrossKeyGroup BEFORE this function runs. So we only need to
+     compute one BMI from any populated pair, then write it into ALL the BMI
+     keys so every form displays the same value. */
   const pairs = [['ia_weight','ia_height','ia_bmi'],['an_weight','an_height','an_bmi'],['nu_weight','nu_height','nu_bmi'],['ch_weight','ch_height','ch_bmi']];
-  pairs.forEach(([w,h,b])=>{
+  let bmiVal = null;
+  for (const [w,h] of pairs) {
     const W = parseFloat(state.data[w]), H = parseFloat(state.data[h]);
-    if (W>0 && H>0) {
+    if (W > 0 && H > 0) {
       const m = H/100;
-      const bmi = (W/(m*m)).toFixed(1);
-      state.data[b] = bmi;
-      const f = document.querySelector(`[data-key="${b}"]`);
-      if (f) f.value = bmi;
+      bmiVal = (W/(m*m)).toFixed(1);
+      break;
     }
+  }
+  if (bmiVal === null) return;
+  // Write the computed BMI into every mirrored BMI key
+  ['ia_bmi','an_bmi','nu_bmi','ch_bmi'].forEach(b => {
+    state.data[b] = bmiVal;
+    document.querySelectorAll(`[data-key="${b}"]`).forEach(f => { f.value = bmiVal; });
   });
 }
 
@@ -3229,6 +3273,72 @@ function mirrorLinkedCheckGroup(group, arr) {
       cb.checked = on;
       cb.closest('.chk').classList.toggle('checked', on);
     });
+  });
+}
+
+/* ---------- Cross-key field mirroring (MIRROR_KEY_GROUPS) ----------
+   The LINKED_KEYS system above mirrors a value to OTHER DOM inputs that share
+   the *same* data-key. But some fields appear on multiple forms under
+   DIFFERENT keys (e.g. height/weight/BMI in Initial Ax, Annual Ax,
+   Nutrition Ax, and the Gastrointestinal section of the Comprehensive Ax;
+   Dignity-of-Risk Yes/No + detail in the Nutrition assessment vs the Care
+   Plan domain). For those, we keep a small map of "groups": when any key in
+   a group changes, copy its value into all the other keys in the same group
+   and update both state.data and any rendered inputs. This is how the user's
+   feedback ("연동 시켜 주세요" — please link these together) is satisfied
+   without renaming long-established field IDs that would break saved data. */
+const MIRROR_KEY_GROUPS = [
+  // ---- Height / Weight / BMI ----
+  // Initial AX Part 5 Nutrition  ↔  Annual AX Part 5 Nutrition
+  // Nutrition individual AX      ↔  Comprehensive AX Gastrointestinal
+  ['ia_weight', 'an_weight', 'nu_weight', 'ch_weight'],
+  ['ia_height', 'an_height', 'nu_height', 'ch_height'],
+  ['ia_bmi',    'an_bmi',    'nu_bmi',    'ch_bmi'   ],
+
+  // ---- Dignity of Risk (Yes/No + Detail) — Nutrition ----
+  // Assessment DOR  ↔  Care Plan Nutrition domain DOR
+  ['nu_dor',         'cp_nutrition_dor'       ],
+  ['nu_dor_detail',  'cp_nutrition_dor_detail'],
+
+  // ---- Dignity of Risk — Enteral feeding ----
+  ['nu_enteral_dor', 'cp_enteral_dor'],
+
+  // ---- Current diet & fluid texture ----
+  // Initial AX Nutrition  ↔  Annual AX Part 5 Nutrition
+  //                       ↔  Individual Nutrition AX
+  //                       ↔  Care Plan Nutrition domain
+  ['nu_diet',  'an_diet_texture',  'cp_nutrition_diet_texture' ],
+  ['nu_fluid', 'an_fluid_texture', 'cp_nutrition_fluid_texture'],
+];
+
+/* Build a quick lookup: key → other keys in its group */
+const MIRROR_KEY_MAP = (function () {
+  const m = {};
+  MIRROR_KEY_GROUPS.forEach(group => {
+    group.forEach(k => {
+      m[k] = group.filter(o => o !== k);
+    });
+  });
+  return m;
+})();
+
+function mirrorAcrossKeyGroup(srcKey, val) {
+  const others = MIRROR_KEY_MAP[srcKey];
+  if (!others) return;
+  others.forEach(otherKey => {
+    // Update state
+    state.data[otherKey] = val;
+    // Update any rendered inputs (selects, text, textareas) for that key
+    document.querySelectorAll(`[data-key="${otherKey}"]`).forEach(el => {
+      if (el.type === 'checkbox') {
+        el.checked = !!val;
+        el.closest('.chk')?.classList.toggle('checked', !!val);
+      } else if (el.value !== val) {
+        el.value = (val == null ? '' : val);
+      }
+    });
+    // Also re-evaluate change highlight if we're in carry-over mode
+    if (state.carriedOver) markFieldChanged(otherKey);
   });
 }
 
@@ -3382,8 +3492,37 @@ function startAnnualReviewFrom(sourceId) {
   writeClients(map);
   return newId;
 }
+/* ---------- normalize cross-key mirrors when a saved client is loaded ----------
+   For each group in MIRROR_KEY_GROUPS, pick the first non-empty value found
+   across the group's keys and copy it into every other key. This handles old
+   records where only one form was filled out before the mirror system existed,
+   plus any state where the keys have drifted apart. Called from applyState. */
+function normalizeMirroredKeys() {
+  /* Backward-compat: nu_diet / nu_fluid used to be multi-select checkbox arrays
+     in the Initial AX. They're now single-select strings everywhere. If we
+     find a leftover array in saved state, collapse it to its first entry. */
+  ['nu_diet','nu_fluid'].forEach(k => {
+    if (Array.isArray(state.data[k])) {
+      state.data[k] = state.data[k][0] || '';
+    }
+  });
+  MIRROR_KEY_GROUPS.forEach(group => {
+    let val = null;
+    for (const k of group) {
+      const v = state.data[k];
+      if (v != null && v !== '' && !(Array.isArray(v) && v.length === 0)) { val = v; break; }
+    }
+    if (val == null) return;
+    group.forEach(k => {
+      if (state.data[k] !== val) state.data[k] = val;
+    });
+  });
+}
+
 function applyState(scope) {
   scope = scope || document;
+  // Sync up any cross-key mirrors first so the DOM update below sees consistent values
+  normalizeMirroredKeys();
   scope.querySelectorAll('[data-key]').forEach(el => {
     const v = state.data[el.dataset.key];
     if (v == null) return;
@@ -3696,7 +3835,15 @@ function buildCarePlan() {
   <!-- Part III: Activities of Daily Living — 14 domain cards, structured per v0.3 -->
   ${cpDomain('nutrition','Nutrition (Meals & Drink)',{
     autoNeeds: autoFor.nutrition,
-    extra: `<div class="grid two">${txt('cp_nutrition_iddsi_meal','Meal IDDSI')}${txt('cp_nutrition_iddsi_drink','Drink IDDSI')}</div>`
+    /* Current diet & fluid texture are mirrored from the assessments
+       (Initial AX, Annual AX, Nutrition AX) — see MIRROR_KEY_GROUPS.
+       Edit in any of the four places and the others update automatically. */
+    extra: `
+      <div class="grid two">
+        ${sel('cp_nutrition_diet_texture','Current diet texture',['Normal chew','Soft cut-up','Bite-sized','Minced moist','Puree'])}
+        ${sel('cp_nutrition_fluid_texture','Fluid texture',['Thin','Mildly thickened','Moderately thickened','Extremely thickened'])}
+      </div>
+      <div class="grid two" style="margin-top:6px">${txt('cp_nutrition_iddsi_meal','Meal IDDSI')}${txt('cp_nutrition_iddsi_drink','Drink IDDSI')}</div>`
   })}
   ${cpDomain('hygiene','Personal Hygiene',{autoNeeds: autoFor.hygiene})}
   ${cpDomain('mobility','Mobility / Transferring',{autoNeeds: autoFor.mobility})}
@@ -4424,6 +4571,40 @@ function openPrintPicker() {
 
 function closePrintPicker() { document.getElementById('printPicker').style.display = 'none'; }
 
+/* ---------- expand all textareas so their full content prints ----------
+   Without this, a textarea taller than its on-screen box gets clipped in the
+   PDF (the user could only see what was visible in the scrolling textarea).
+   We snapshot each textarea's inline height, then set it to scrollHeight just
+   before printing, and restore the original after the dialog returns. */
+function expandFieldsForPrint() {
+  document.querySelectorAll('textarea').forEach(t => {
+    // Save the original inline height (may be empty string) so we can restore.
+    t.dataset._origHeight = t.style.height || '';
+    t.style.height = 'auto';
+    // 4px buffer to avoid the last line being cut off by sub-pixel rounding.
+    const h = Math.max(t.scrollHeight + 4, 36);
+    t.style.height = h + 'px';
+  });
+  // Text inputs / selects rarely overflow, but if the content is longer than
+  // the field width the browser will clip it. Add a hint class for any CSS rule.
+  document.body.classList.add('print-expanded');
+}
+function restoreFieldsAfterPrint() {
+  document.querySelectorAll('textarea').forEach(t => {
+    if ('_origHeight' in t.dataset) {
+      t.style.height = t.dataset._origHeight;
+      delete t.dataset._origHeight;
+    }
+  });
+  document.body.classList.remove('print-expanded');
+}
+
+/* If the user uses the browser's File → Print menu (rather than the in-app
+   print button), the expand step still runs because we hook the global
+   beforeprint / afterprint events. */
+window.addEventListener('beforeprint', expandFieldsForPrint);
+window.addEventListener('afterprint', restoreFieldsAfterPrint);
+
 function executePrint() {
   const items = buildPrintItems();
   const itemsByKey = {}; items.forEach(i => itemsByKey[i.key] = i);
@@ -4449,6 +4630,11 @@ function executePrint() {
   closePrintPicker();
   // Slight delay so DOM updates settle before opening native dialog
   setTimeout(() => {
+    // Expand textareas to their full content height BEFORE the print dialog
+    // opens. The beforeprint event will also fire and call this, but doing it
+    // explicitly here is belt-and-braces in case the browser fires the event
+    // after the snapshot is already taken.
+    expandFieldsForPrint();
     window.print();
     // Cleanup after the print dialog returns
     setTimeout(() => {
@@ -4456,6 +4642,9 @@ function executePrint() {
       document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
       // Restore active step
       document.querySelectorAll('.step-panel').forEach(p => p.classList.toggle('active', p.dataset.step === state.currentStep));
+      // Restore textarea heights (afterprint already does this, but be safe in
+      // case the user cancelled the dialog before afterprint fired).
+      restoreFieldsAfterPrint();
     }, 600);
   }, 60);
 }
