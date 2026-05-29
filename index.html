@@ -928,11 +928,13 @@ window.ODC_CLOUD = (function() {
     /* CRITICAL print fix: textareas (and any scrolling fields) must expand to
        show ALL of their content when printed. Previously, long text was clipped
        to the on-screen fixed height. The before-print JS handler sets the
-       inline height to scrollHeight; these rules make sure the browser doesn't
-       overlay a scrollbar or clip the overflow. */
+       inline height to scrollHeight WITH !important; these rules make sure
+       the browser doesn't overlay a scrollbar or clip the overflow.
+       NOTE: we deliberately do NOT set `height: auto` here — that would
+       override the JS-computed inline height (which has !important) only if
+       this rule were more specific. Leave height to the JS handler. */
     textarea {
       min-height: 36px !important;
-      height: auto !important;
       max-height: none !important;
       overflow: visible !important;
       white-space: pre-wrap !important;
@@ -941,6 +943,12 @@ window.ODC_CLOUD = (function() {
       resize: none !important;
       page-break-inside: auto !important;
       break-inside: auto !important;
+    }
+    /* Fallback: textareas the JS handler didn't reach (e.g. dynamically added
+       just before print) still need to expand. Convert them into block content
+       via CSS by treating overflow as visible and letting min-content size them. */
+    body.print-expanded textarea {
+      height: auto;
     }
     input[type="text"], input[type="email"], input[type="tel"], input[type="number"], input[type="date"], select {
       overflow: visible !important;
@@ -1657,6 +1665,11 @@ function buildInitialAssessment() {
       ${ta('p_culture','Cultural background / preferences')}
       ${txt('p_language','Preferred language')}
       ${sel('p_interpreter','Interpreter required',['Yes','No'])}
+      ${sel('p_financial','Financial status',['Full pension','Partial pension','Private','Others','Do not want to share'])}
+      ${txt('p_financial_other','Others — specify')}
+    </div>
+    <div style="margin-top:10px">
+      ${ta('p_background','Participant’s general / cultural / religious / life background',{rows:4,placeholder:'Use this space to capture the participant’s general background, cultural heritage, religious or spiritual practices, language and family context, important life experiences, work history, and anything else that helps staff provide person-centred care.'})}
     </div>
   </div>
 
@@ -3770,6 +3783,11 @@ function buildCarePlan() {
       <div><strong>Allergies:</strong> ${D.med_allergies||'—'}</div>
       <div><strong>Medications:</strong> ${D.med_meds||'see file'}</div>
       <div><strong>ATSI:</strong> ${D.p_atsi||'—'} · <strong>Language:</strong> ${D.p_language||'—'}</div>
+      <div><strong>Financial status:</strong> ${D.p_financial ? (D.p_financial === 'Others' && D.p_financial_other ? 'Others — ' + D.p_financial_other : D.p_financial) : '—'}</div>
+    </div>
+    <div style="margin-top:10px">
+      <div class="sec-head" style="margin-top:6px"><h3 style="margin:0">Participant’s general / cultural / religious / life background</h3></div>
+      <div style="white-space:pre-wrap;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:#fff;min-height:60px">${(D.p_background||'—').replace(/</g,'&lt;')}</div>
     </div>
   </div>
 
@@ -4591,12 +4609,16 @@ function closePrintPicker() { document.getElementById('printPicker').style.displ
    before printing, and restore the original after the dialog returns. */
 function expandFieldsForPrint() {
   document.querySelectorAll('textarea').forEach(t => {
-    // Save the original inline height (may be empty string) so we can restore.
-    t.dataset._origHeight = t.style.height || '';
-    t.style.height = 'auto';
+    // Save the original inline height + priority so we can restore precisely.
+    t.dataset._origHeight = t.style.getPropertyValue('height') || '';
+    t.dataset._origPriority = t.style.getPropertyPriority('height') || '';
+    // Clear first so scrollHeight reflects the natural content height.
+    t.style.setProperty('height', 'auto', 'important');
     // 4px buffer to avoid the last line being cut off by sub-pixel rounding.
     const h = Math.max(t.scrollHeight + 4, 36);
-    t.style.height = h + 'px';
+    // Use !important so @media print rules cannot collapse the textarea back
+    // to the rows-based default (which was the cause of cut-off text).
+    t.style.setProperty('height', h + 'px', 'important');
   });
   // Text inputs / selects rarely overflow, but if the content is longer than
   // the field width the browser will clip it. Add a hint class for any CSS rule.
@@ -4605,8 +4627,14 @@ function expandFieldsForPrint() {
 function restoreFieldsAfterPrint() {
   document.querySelectorAll('textarea').forEach(t => {
     if ('_origHeight' in t.dataset) {
-      t.style.height = t.dataset._origHeight;
+      // Re-apply the original value with its original priority (or remove it).
+      if (t.dataset._origHeight === '') {
+        t.style.removeProperty('height');
+      } else {
+        t.style.setProperty('height', t.dataset._origHeight, t.dataset._origPriority || '');
+      }
       delete t.dataset._origHeight;
+      delete t.dataset._origPriority;
     }
   });
   document.body.classList.remove('print-expanded');
