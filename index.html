@@ -2248,6 +2248,13 @@ function buildAnnualAssessment() {
       ${txt('p_date','Date',{type:'date'})}
     </div>
     <div style="margin-top:10px"><label class="field"><span>Support at Home — Level / Funding</span>${checks('p_funding',['SAH 1','SAH 2','SAH 3','SAH 4','SAH 5','SAH 6','SAH 7','SAH 8','Transitioned Level 1','Transitioned Level 2','Transitioned Level 3','Transitioned Level 4','NDIS','Attendant Care','Private'],{cols:3})}</label></div>
+    <div class="grid two" style="margin-top:10px">
+      ${sel('p_financial','Financial status',['Full pension','Partial pension','Private','Others','Do not want to share'])}
+      ${txt('p_financial_other','Others — specify')}
+    </div>
+    <div style="margin-top:10px">
+      ${ta('p_background','Participant’s general / cultural / religious / life background',{rows:4})}
+    </div>
   </div>
 
   <div class="card">
@@ -3783,11 +3790,14 @@ function buildCarePlan() {
       <div><strong>Allergies:</strong> ${D.med_allergies||'—'}</div>
       <div><strong>Medications:</strong> ${D.med_meds||'see file'}</div>
       <div><strong>ATSI:</strong> ${D.p_atsi||'—'} · <strong>Language:</strong> ${D.p_language||'—'}</div>
-      <div><strong>Financial status:</strong> ${D.p_financial ? (D.p_financial === 'Others' && D.p_financial_other ? 'Others — ' + D.p_financial_other : D.p_financial) : '—'}</div>
+    </div>
+    <!-- Editable fields — mirror across Initial Ax, Annual Ax & Care Plan via data-key binding -->
+    <div class="grid two" style="margin-top:10px">
+      ${sel('p_financial','Financial status',['Full pension','Partial pension','Private','Others','Do not want to share'])}
+      ${txt('p_financial_other','Others — specify')}
     </div>
     <div style="margin-top:10px">
-      <div class="sec-head" style="margin-top:6px"><h3 style="margin:0">Participant’s general / cultural / religious / life background</h3></div>
-      <div style="white-space:pre-wrap;padding:8px 10px;border:1px solid var(--line);border-radius:4px;background:#fff;min-height:60px">${(D.p_background||'—').replace(/</g,'&lt;')}</div>
+      ${ta('p_background','Participant’s general / cultural / religious / life background',{rows:4})}
     </div>
   </div>
 
