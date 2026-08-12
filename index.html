@@ -4678,7 +4678,31 @@ function restoreFieldsAfterPrint() {
 /* If the user uses the browser's File → Print menu (rather than the in-app
    print button), the expand step still runs because we hook the global
    beforeprint / afterprint events. */
-window.addEventListener('beforeprint', expandFieldsForPrint);
+// Force every printable signature <img> to match the saved signature data.
+// Returns decode() promises so the caller can wait until images are painted
+// before opening the print dialog — otherwise a signature added just before
+// printing (typically the participant's) can be missing from the PDF because
+// its data-URL image had not finished decoding when the snapshot was taken.
+function syncSignaturePrintImages() {
+  const promises = [];
+  document.querySelectorAll('[data-sigimg]').forEach(img => {
+    const key = img.dataset.sigimg;
+    const data = state.data[key];
+    const wrap = img.closest('.sig-wrap');
+    if (data) {
+      if (img.getAttribute('src') !== data) img.src = data;
+      img.classList.add('has-sig');
+      if (wrap) wrap.classList.add('has-sig');
+      if (typeof img.decode === 'function') promises.push(img.decode().catch(() => {}));
+    } else {
+      img.removeAttribute('src');
+      img.classList.remove('has-sig');
+      if (wrap) wrap.classList.remove('has-sig');
+    }
+  });
+  return promises;
+}
+window.addEventListener('beforeprint', () => { expandFieldsForPrint(); syncSignaturePrintImages(); });
 window.addEventListener('afterprint', restoreFieldsAfterPrint);
 
 function executePrint() {
@@ -4711,17 +4735,27 @@ function executePrint() {
     // explicitly here is belt-and-braces in case the browser fires the event
     // after the snapshot is already taken.
     expandFieldsForPrint();
-    window.print();
-    // Cleanup after the print dialog returns
-    setTimeout(() => {
-      document.body.classList.remove('print-filter');
-      document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
-      // Restore active step
-      document.querySelectorAll('.step-panel').forEach(p => p.classList.toggle('active', p.dataset.step === state.currentStep));
-      // Restore textarea heights (afterprint already does this, but be safe in
-      // case the user cancelled the dialog before afterprint fired).
-      restoreFieldsAfterPrint();
-    }, 600);
+    // Make sure every signature image is set and fully decoded before printing,
+    // so a signature added moments earlier (e.g. the participant's) is never
+    // dropped from the PDF. Cap the wait so print never hangs.
+    const imgPromises = syncSignaturePrintImages();
+    const doPrint = () => {
+      window.print();
+      // Cleanup after the print dialog returns
+      setTimeout(() => {
+        document.body.classList.remove('print-filter');
+        document.querySelectorAll('.print-include').forEach(el => el.classList.remove('print-include'));
+        // Restore active step
+        document.querySelectorAll('.step-panel').forEach(p => p.classList.toggle('active', p.dataset.step === state.currentStep));
+        // Restore textarea heights (afterprint already does this, but be safe in
+        // case the user cancelled the dialog before afterprint fired).
+        restoreFieldsAfterPrint();
+      }, 600);
+    };
+    Promise.race([
+      Promise.all(imgPromises),
+      new Promise(res => setTimeout(res, 400))
+    ]).then(doPrint);
   }, 60);
 }
 
