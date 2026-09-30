@@ -10,6 +10,19 @@
 
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
+
+     APP VERSION: v2.1 (30 Sep 2026)
+     Version history:
+       v2.1 — Data-loss protection: on-device shadow backup before every save and
+              before login redirects; failed saves show a red banner and retry
+              every 10s; restore prompt when a newer unsaved copy exists on this
+              device; warning when closing the tab with unsaved changes.
+       v2.0 — Page numbers on printed PDFs (@page counters); Annual AX sign-off
+              keys renamed (an_rn_*) so its signature prints; Care Plan dates as
+              dd/mm/yyyy; participant signature no longer dropped from PDFs;
+              Participant block removed from Initial AX sign-off.
+     NOTE: bump this version block AND the two visible badges (login overlay
+     'Cloud · vX.Y' + topbar 'CARE PLAN WORKFLOW · vX.Y') on every change.
      Auth: MSAL.js (Microsoft Authentication Library)
      We try multiple CDNs because some networks block Microsoft's own CDN.
      ============================================================ -->
@@ -119,6 +132,10 @@ window.ODC_CLOUD = (function() {
       return r.accessToken;
     } catch (err) {
       console.warn('Silent token failed, falling back to redirect:', err);
+      // The redirect NAVIGATES AWAY from the page, wiping any unsaved in-memory
+      // work. Snapshot the current client to this device first so nothing is lost
+      // (restored via the shadow-backup prompt on the next load).
+      try { if (typeof window.__odcShadowSave === 'function') window.__odcShadowSave(); } catch (e) {}
       await _msalApp.acquireTokenRedirect({ scopes: cfg.scopes });
       // Page redirects — control returns via handleRedirectPromise. Token will be available on the next attempt.
       throw new Error('Token refresh required — redirecting to sign-in.');
@@ -545,7 +562,7 @@ window.ODC_CLOUD = (function() {
     }
   }).catch(function(err) {
     console.error('Init error:', err);
-    setStatus('Sign-in error: ' + (err.message || err), true);
+    setStatus('Sign-in error: ' + (err.message || err) + ' — Redirect URI in use: ' + (location.origin + location.pathname) + ' (this exact URL must be registered in Azure AD > Authentication > SPA).', true);
   });
 
   btn.addEventListener('click', async function() {
@@ -556,7 +573,7 @@ window.ODC_CLOUD = (function() {
       // Note: page redirects away. afterLogin runs on the next page load via init().
     } catch (err) {
       console.error(err);
-      setStatus('Sign-in failed: ' + (err.message || err), true);
+      setStatus('Sign-in failed: ' + (err.message || err) + ' — Redirect URI in use: ' + (location.origin + location.pathname) + ' (this exact URL must be registered in Azure AD > Authentication > SPA).', true);
       btn.disabled = false;
     }
   });
@@ -1068,7 +1085,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v0.5</span>
+    <span class="badge">Cloud · v2.1</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1082,7 +1099,7 @@ window.ODC_CLOUD = (function() {
     <div class="brand">
       <img id="topLogo" alt="One Dream Community" class="brand-logo"/>
       <span>One Dream Community</span>
-      <small id="modeLabel">CARE PLAN WORKFLOW · v0.4</small>
+      <small id="modeLabel">CARE PLAN WORKFLOW · v2.1</small>
     </div>
     <span class="mode-chip" id="modeChip" style="display:none">New Client</span>
     <span class="client-chip" id="clientChip" style="display:none">—</span>
@@ -4951,6 +4968,65 @@ if (_activeId && loadClient(_activeId) && state.mode) {
     if (window.__cloudStorageInstalled) return;
     window.__cloudStorageInstalled = true;
 
+    /* ---------- Local shadow backup (data-loss protection) ----------
+       Every autoSave first writes the full client state to THIS DEVICE
+       (localStorage) before attempting the SharePoint save. If the cloud save
+       fails (expired sign-in, network drop, throttling) or the page redirects
+       to Microsoft login mid-session, nothing is lost: when the client is next
+       opened on this device, the newer unsaved copy is offered for restore. */
+    var SHADOW_PREFIX = 'odc_shadow_';
+    function shadowWrite(id, synced) {
+      if (!id) return;
+      var rec = { t: Date.now(), synced: !!synced, mode: state.mode, state: state };
+      try {
+        localStorage.setItem(SHADOW_PREFIX + id, JSON.stringify(rec));
+      } catch (e) {
+        // Storage full — prune the oldest ALREADY-SYNCED shadows and retry once.
+        try {
+          var keys = [];
+          for (var i = 0; i < localStorage.length; i++) {
+            var k = localStorage.key(i);
+            if (k && k.indexOf(SHADOW_PREFIX) === 0 && k !== SHADOW_PREFIX + id) keys.push(k);
+          }
+          keys.map(function(k) {
+                var v = { t: 0 };
+                try { v = JSON.parse(localStorage.getItem(k) || '{}'); } catch (_) {}
+                return { k: k, t: v.t || 0, synced: !!v.synced };
+              })
+              .filter(function(x) { return x.synced; })
+              .sort(function(a, b) { return a.t - b.t; })
+              .slice(0, 5)
+              .forEach(function(x) { localStorage.removeItem(x.k); });
+          localStorage.setItem(SHADOW_PREFIX + id, JSON.stringify(rec));
+        } catch (e2) { console.warn('Shadow backup failed:', e2); }
+      }
+    }
+    window.__odcShadowSave = function() { shadowWrite(activeClientId, false); };
+
+    // Big red banner for failed saves — a tiny status label is too easy to miss
+    // when the failure means client data is not reaching SharePoint.
+    function saveFailBanner(show) {
+      var b = document.getElementById('odcSaveFailBanner');
+      if (!show) { if (b) b.style.display = 'none'; return; }
+      if (!b) {
+        b = document.createElement('div');
+        b.id = 'odcSaveFailBanner';
+        b.className = 'no-print';
+        b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#a64b2a;color:#fff;padding:10px 16px;font-size:14px;font-weight:600;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.35)';
+        document.body.appendChild(b);
+      }
+      b.textContent = '⚠ NOT SAVED to SharePoint — your changes are kept on this device and saving will retry automatically. Do NOT clear browser data. / 저장 실패 — 변경사항은 이 기기에 임시 보관되었고 자동으로 재시도합니다. 브라우저 데이터를 지우지 마세요.';
+      b.style.display = 'block';
+    }
+
+    // Warn before closing the tab while a save is pending or has failed.
+    window.addEventListener('beforeunload', function(e) {
+      if (window.__odcSavePending || window.__odcLastSaveFailed) {
+        e.preventDefault();
+        e.returnValue = '';
+      }
+    });
+
     // Override read/write — backed by ODC_CLOUD.clientCache
     readClients = function() {
       return ODC_CLOUD.clientCache;
@@ -4962,6 +5038,7 @@ if (_activeId && loadClient(_activeId) && state.mode) {
 
     // Override autoSave — push current client to SharePoint (debounced 1.5s)
     autoSave = function() {
+      window.__odcSavePending = true;
       clearTimeout(saveTimer);
       saveTimer = setTimeout(async function() {
         try {
@@ -4996,6 +5073,10 @@ if (_activeId && loadClient(_activeId) && state.mode) {
             lastModifiedBy: _userLabel,
             state: state
           });
+          // FIRST: keep a copy on this device, so a failed/interrupted cloud save
+          // can never lose the user's work.
+          shadowWrite(activeClientId, false);
+
           // Show "Saving…" status
           const sEl = document.getElementById('saveStatus');
           if (sEl) { sEl.textContent = 'Saving…'; sEl.classList.remove('saved'); }
@@ -5003,16 +5084,26 @@ if (_activeId && loadClient(_activeId) && state.mode) {
           await ODC_CLOUD.saveClient(updated);   // pushes to SP, sets spItemId on first save
           setActiveClient(activeClientId);
 
+          // Mark the on-device copy as synced and clear any failure warnings.
+          shadowWrite(activeClientId, true);
+          window.__odcSavePending = false;
+          window.__odcLastSaveFailed = false;
+          saveFailBanner(false);
+
           if (sEl) { sEl.textContent = 'Saved ' + new Date().toLocaleTimeString(); sEl.classList.add('saved'); }
           updateClientChip();
         } catch (err) {
           console.error('Cloud save failed:', err);
+          window.__odcLastSaveFailed = true;
+          saveFailBanner(true);
           const sEl = document.getElementById('saveStatus');
           if (sEl) {
-            sEl.textContent = '⚠ Save failed (will retry)';
+            sEl.textContent = '⚠ Save failed (retrying…)';
             sEl.classList.remove('saved');
             sEl.title = err.message || String(err);
           }
+          // REAL retry — keep trying every 10s until the save goes through.
+          setTimeout(function() { autoSave(); }, 10000);
         }
       }, 1500);
     };
@@ -5030,6 +5121,29 @@ if (_activeId && loadClient(_activeId) && state.mode) {
       if (!state.mode && entry.mode) state.mode = entry.mode;
       if (!state.currentStep) state.currentStep = (state.mode === 'annual' ? 'annual' : 'initial');
       if (!Array.isArray(state.updates)) state.updates = [];
+      // If THIS DEVICE holds newer UNSAVED changes for this client (from a failed
+      // cloud save or a mid-session login redirect), offer to restore them.
+      try {
+        var _sh = JSON.parse(localStorage.getItem('odc_shadow_' + id) || 'null');
+        if (_sh && _sh.state && !_sh.synced && _sh.t > ((entry.lastSaved || 0) + 2000)) {
+          var _msg = 'UNSAVED changes for this client were found on this device\n' +
+                     '(' + new Date(_sh.t).toLocaleString() + ' — newer than the SharePoint copy).\n\n' +
+                     'OK = restore the unsaved changes (recommended)\n' +
+                     'Cancel = discard them and use the SharePoint version';
+          if (confirm(_msg)) {
+            state = Object.assign(
+              { mode: null, currentStep: null, data: {}, selectedTools: {}, manualTools: {}, carePlan: {}, updates: [] },
+              _sh.state
+            );
+            if (!state.mode && entry.mode) state.mode = entry.mode;
+            if (!state.currentStep) state.currentStep = (state.mode === 'annual' ? 'annual' : 'initial');
+            if (!Array.isArray(state.updates)) state.updates = [];
+            setTimeout(function() { autoSave(); }, 500); // push the restored data to SharePoint
+          } else {
+            localStorage.removeItem('odc_shadow_' + id); // user chose SP version — drop stale shadow
+          }
+        }
+      } catch (e) { console.warn('Shadow restore check failed:', e); }
       setActiveClient(id);
       // Refresh updates badge for the newly loaded client
       if (typeof window.__refreshUpdatesBadge === 'function') window.__refreshUpdatesBadge();
