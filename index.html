@@ -11,8 +11,13 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v2.1 (30 Sep 2026)
+     APP VERSION: v2.2 (3 Oct 2026)
      Version history:
+       v2.2 — Save PDFs straight into the client's SharePoint folder (Aged Care
+              Team site > "ODC Home Care  Clients" library): each client is
+              linked to their folder once, the care-plan sub-folder is found
+              automatically, and the PDF saved from Print is filed with a
+              standard name. Also a trial "create PDF automatically" option.
        v2.1 — Data-loss protection: on-device shadow backup before every save and
               before login redirects; failed saves show a red banner and retry
               every 10s; restore prompt when a newer unsaved copy exists on this
@@ -55,7 +60,15 @@
     spSitePath:  '/sites/CarePlan',
     clientsListName: 'Clients',
     updatesListName: 'CarePlanUpdates',
-    scopes:      ['User.Read', 'Sites.ReadWrite.All']
+    scopes:      ['User.Read', 'Sites.ReadWrite.All'],
+    // Where finished PDFs are filed: the document library that holds one folder
+    // per client. driveId is that library's Graph drive id (fastest); if it is
+    // blank or stops working, the library is looked up from sitePath + libraryName.
+    clientFiles: {
+      sitePath:    '/sites/AgedCareTeam622',
+      libraryName: 'ODC Home Care  Clients',
+      driveId:     'b!I0bis5wgzk-JzgADzP8AlM-JoBNOh31Ov6V81jmvQvPTCssh40DySJzey3au5DT7'
+    }
   };
 </script>
 
@@ -1085,7 +1098,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v2.1</span>
+    <span class="badge">Cloud · v2.2</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1099,7 +1112,7 @@ window.ODC_CLOUD = (function() {
     <div class="brand">
       <img id="topLogo" alt="One Dream Community" class="brand-logo"/>
       <span>One Dream Community</span>
-      <small id="modeLabel">CARE PLAN WORKFLOW · v2.1</small>
+      <small id="modeLabel">CARE PLAN WORKFLOW · v2.2</small>
     </div>
     <span class="mode-chip" id="modeChip" style="display:none">New Client</span>
     <span class="client-chip" id="clientChip" style="display:none">—</span>
@@ -1115,9 +1128,48 @@ window.ODC_CLOUD = (function() {
       <button class="mini-btn" id="btnInterim" title="Quick interim care plan" style="display:none">📝 Interim CP</button>
       <button class="mini-btn" id="btnEmailCoord" title="Email the care plan to this client's coordinator">📧 Email</button>
       <button class="mini-btn primary" id="btnPrint">🖨 Print…</button>
+      <button class="mini-btn" id="btnSpSave" title="File the PDF in this client's SharePoint folder">☁ Save to client folder</button>
     </div>
   </div>
 </header>
+
+<!-- save-to-client-folder modal (v2.2) -->
+<style>
+  #spSaveModal .sp-row { display: grid; grid-template-columns: 110px 1fr auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px dashed var(--line); font-size: 13.5px; }
+  #spSaveModal .sp-row .lbl { color: var(--ink-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .04em; font-weight: 600; }
+  #spSaveModal .sp-row .val { min-width: 0; overflow-wrap: anywhere; }
+  #spSaveModal .sp-row .val small { display: block; color: var(--ink-muted); font-size: 11.5px; }
+  #spSaveModal .sp-row input[type="text"], #spSaveModal .sp-row select { width: 100%; padding: 6px 8px; border: 1px solid var(--line); border-radius: 4px; font: inherit; font-size: 13.5px; }
+  #spSaveModal .sp-link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 12.5px; text-decoration: underline; }
+  #spSaveModal .sp-drop { margin-top: 14px; border: 2px dashed var(--line-strong, #b9c9a8); border-radius: 8px; padding: 22px 16px; text-align: center; cursor: pointer; background: var(--accent-light); }
+  #spSaveModal .sp-drop.over { border-color: var(--accent); background: #dfeccf; }
+  #spSaveModal .sp-drop strong { display: block; font-size: 15px; margin-bottom: 4px; }
+  #spSaveModal .sp-drop span { font-size: 12.5px; color: var(--ink-soft); }
+  #spSaveModal .sp-list { margin: 10px 0; max-height: 300px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; }
+  #spSaveModal .sp-item { display: block; width: 100%; text-align: left; background: #fff; border: 0; border-bottom: 1px solid var(--line); padding: 9px 12px; cursor: pointer; font: inherit; font-size: 13.5px; }
+  #spSaveModal .sp-item:last-child { border-bottom: 0; }
+  #spSaveModal .sp-item:hover { background: var(--accent-light); }
+  #spSaveModal .sp-item small { display: block; color: var(--ink-muted); font-size: 11.5px; }
+  #spSaveModal .sp-status { margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; overflow-wrap: anywhere; }
+  #spSaveModal .sp-status.info { display: block; background: #f4f6ee; color: var(--ink-soft); }
+  #spSaveModal .sp-status.ok { display: block; background: #dceadb; color: #1f4a22; }
+  #spSaveModal .sp-status.err { display: block; background: #fbe9e1; color: #8a2f12; }
+  #spSaveModal a { color: var(--accent-deep); }
+  #spSaveModal .sp-auto { margin-top: 12px; font-size: 12.5px; color: var(--ink-muted); }
+</style>
+<div class="modal-bg no-print" id="spSaveModal" style="display:none">
+  <div class="modal" style="max-width:640px;max-height:90vh;overflow-y:auto;padding:24px">
+    <h2 class="serif" style="margin:0 0 4px">Save to the client's <em>SharePoint folder</em></h2>
+    <p id="spIntro" style="margin:0 0 6px;font-size:13.5px;color:var(--ink-soft)"></p>
+    <div id="spBody"></div>
+    <div class="sp-status" id="spStatus"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
+      <label style="font-size:12px;color:var(--ink-muted);display:flex;align-items:center;gap:6px"><input type="checkbox" id="spAfterPrint"/> Show this after every print</label>
+      <button class="btn ghost" id="spClose">Close</button>
+    </div>
+    <input type="file" id="spFile" accept="application/pdf,.pdf" style="display:none"/>
+  </div>
+</div>
 
 <!-- print selection modal -->
 <div class="modal-bg no-print" id="printPicker" style="display:none">
@@ -4757,6 +4809,8 @@ function executePrint() {
     // dropped from the PDF. Cap the wait so print never hangs.
     const imgPromises = syncSignaturePrintImages();
     const doPrint = () => {
+      // Tells the save-to-client-folder prompt (v2.2) that this print came from the app.
+      window.__odcPrintViaApp = true;
       window.print();
       // Cleanup after the print dialog returns
       setTimeout(() => {
@@ -5506,6 +5560,803 @@ if (_activeId && loadClient(_activeId) && state.mode) {
     if (typeof window.__refreshMigrateBanner === 'function') window.__refreshMigrateBanner();
     if (typeof updateInterimButton === 'function') updateInterimButton();
   };
+})();
+</script>
+<!-- ============================================================
+     SAVE TO CLIENT FOLDER (v2.2)
+     Files PDFs in the client's own folder in the "ODC Home Care  Clients"
+     library (Aged Care Team site). Uses the same sign-in and permission
+     (Sites.ReadWrite.All) as the rest of the app — no Azure changes needed.
+
+     ODC_FILES    — Graph helpers (find folder, find sub-folder, upload, convert)
+     ODC_FILES_UI — the "Save to client folder" dialog
+     The link between a client and their folder is stored with the client
+     record in state.data._spFiles, so it only has to be confirmed once.
+     ============================================================ -->
+<script>
+window.ODC_FILES = (function() {
+  const cfg = window.ODC_CLOUD_CONFIG || {};
+  const CF = cfg.clientFiles || {};
+  let _driveId = CF.driveId || null;
+  let _driveOk = false;
+  let _libUrl = '';
+
+  function G(path, options) { return ODC_CLOUD.graph(path, options); }
+  // Letters and digits only (any language), lower-case — for forgiving name matching.
+  function norm(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ''); }
+  function isNotFound(err) { return /Graph 404/.test(String(err && err.message)); }
+
+  async function drive() {
+    if (_driveId && _driveOk) return _driveId;
+    if (_driveId) {
+      try {
+        const d = await G('/drives/' + _driveId + '?$select=id,webUrl');
+        _libUrl = d.webUrl || '';
+        _driveOk = true;
+        return _driveId;
+      } catch (err) {
+        console.warn('Configured client-files drive id did not work, looking the library up by name:', err);
+        _driveId = null;
+      }
+    }
+    let list;
+    try {
+      const site = await G('/sites/' + cfg.spHostname + ':' + CF.sitePath);
+      list = await G('/sites/' + site.id + '/drives?$select=id,name,webUrl');
+    } catch (err) {
+      throw new Error('Could not open the client files site (' + CF.sitePath + '). Your account may not have access to it. [' + (err.message || err) + ']');
+    }
+    const want = norm(CF.libraryName);
+    const hit = (list.value || []).find(function(d) {
+      let tail = '';
+      try { tail = decodeURIComponent(String(d.webUrl || '').split('/').pop()); } catch (e) {}
+      return norm(d.name) === want || norm(tail) === want;
+    });
+    if (!hit) throw new Error('Library "' + CF.libraryName + '" was not found on ' + CF.sitePath + '.');
+    _driveId = hit.id; _libUrl = hit.webUrl || ''; _driveOk = true;
+    return _driveId;
+  }
+
+  // "/drives/<id>/root:/A/B" -> "A/B"
+  function parentPath(item) {
+    const p = (item.parentReference && item.parentReference.path) || '';
+    const i = p.indexOf('root:');
+    let rel = i >= 0 ? p.slice(i + 5) : '';
+    try { rel = decodeURIComponent(rel); } catch (e) {}
+    return rel.replace(/^\/+/, '');
+  }
+
+  // yyyy-mm-dd or dd/mm/yyyy -> { ym: 'yyyymm', dmy: 'ddmmyyyy' }
+  function dobKeys(dob) {
+    const s = String(dob || '').trim();
+    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m) return { ym: m[1] + m[2], dmy: m[3] + m[2] + m[1] };
+    m = s.match(/^(\d{1,2})[\/.\-](\d{1,2})[\/.\-](\d{4})$/);
+    if (m) {
+      const dd = ('0' + m[1]).slice(-2), mm = ('0' + m[2]).slice(-2);
+      return { ym: m[3] + mm, dmy: dd + mm + m[3] };
+    }
+    return null;
+  }
+
+  // Score a folder against the participant's name (+ date of birth if known).
+  // Client folders look like "Kum Lee Kim (kumleekim194107)".
+  function scoreFolder(folderName, name, dob) {
+    const fn = String(folderName || '').toLowerCase();
+    const tokens = String(name || '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(function(t) { return t.length > 1; });
+    if (!tokens.length) return 0;
+    for (const t of tokens) { if (fn.indexOf(t) < 0) return 0; }
+    let score = 10;
+    if (norm(fn.split('(')[0]) === norm(name)) score += 5;
+    const k = dobKeys(dob);
+    if (k && (fn.indexOf(k.ym) >= 0 || fn.indexOf(k.dmy) >= 0)) score += 5;
+    return score;
+  }
+
+  async function searchFolders(name, dob) {
+    const d = await drive();
+    const q = String(name || '').trim();
+    if (!q) return [];
+    const found = {};
+    function consider(item) {
+      if (!item || !item.folder || !item.id) return;
+      const sc = scoreFolder(item.name, q, dob);
+      if (sc > 0) found[item.id] = { id: item.id, name: item.name, path: parentPath(item), url: item.webUrl || '', score: sc };
+    }
+    let url = '/drives/' + d + "/root/search(q='" + encodeURIComponent(q.replace(/'/g, "''")) +
+              "')?$select=id,name,folder,webUrl,parentReference&$top=200";
+    for (let page = 0; url && page < 3; page++) {
+      const r = await G(url);
+      (r.value || []).forEach(consider);
+      url = r['@odata.nextLink'] || null;
+    }
+    // The drive search returns files as well as folders, so a client with a lot of
+    // documents can crowd the folder out. Fall back to Microsoft Search, folders only.
+    if (!Object.keys(found).length && _libUrl) {
+      try {
+        let lib = _libUrl;
+        try { lib = decodeURIComponent(lib); } catch (e) {}
+        const r = await G('/search/query', { method: 'POST', body: { requests: [{
+          entityTypes: ['driveItem'],
+          query: { queryString: '"' + q.replace(/"/g, '') + '" IsDocument:false path:"' + lib + '"' },
+          from: 0, size: 50
+        }] } });
+        const cont = (((r.value || [])[0] || {}).hitsContainers || [])[0] || {};
+        (cont.hits || []).forEach(function(h) {
+          const res = h.resource || {};
+          if (res.id && res.name && scoreFolder(res.name, q, dob) > 0) {
+            found[res.id] = { id: res.id, name: res.name, path: '', url: res.webUrl || '', score: scoreFolder(res.name, q, dob) };
+          }
+        });
+      } catch (err) { console.warn('Fallback folder search failed:', err); }
+    }
+    return Object.keys(found).map(function(k) { return found[k]; })
+      .sort(function(a, b) { return b.score - a.score || a.path.length - b.path.length || a.name.localeCompare(b.name); });
+  }
+
+  async function listFolders(folderId) {
+    const d = await drive();
+    const base = folderId ? '/drives/' + d + '/items/' + folderId + '/children' : '/drives/' + d + '/root/children';
+    let url = base + '?$select=id,name,folder,webUrl&$top=200';
+    const out = [];
+    for (let page = 0; url && page < 10; page++) {
+      const r = await G(url);
+      (r.value || []).forEach(function(it) { if (it.folder) out.push({ id: it.id, name: it.name, url: it.webUrl || '' }); });
+      url = r['@odata.nextLink'] || null;
+    }
+    return out.sort(function(a, b) { return a.name.localeCompare(b.name, undefined, { numeric: true }); });
+  }
+
+  async function getFolder(folderId) {
+    const d = await drive();
+    return G('/drives/' + d + '/items/' + folderId + '?$select=id,name,webUrl,folder');
+  }
+
+  // Which sub-folder a document belongs in. Client folders are laid out like
+  //   <client>/Clinical_2026/3. Care plan
+  //   <client>/Clinical/Clinical_2026/3. Care plan
+  //   <client>/Clinical/3. Care plan
+  // so we walk down through "Clinical…"/year folders and pick the best match,
+  // preferring this year's folder.
+  const KIND_MATCH = {
+    care:       function(n) { return /care\s*plan/i.test(n) && !/interim/i.test(n); },
+    interim:    function(n) { return /interim/i.test(n); },
+    initial:    function(n) { return /initial/i.test(n); },
+    assessment: function(n) { return /assess/i.test(n) && !/initial|interim/i.test(n); }
+  };
+  async function findDest(clientFolderId, kind) {
+    const match = KIND_MATCH[kind] || KIND_MATCH.care;
+    const thisYear = new Date().getFullYear();
+    const hits = [];
+    let level = [{ id: clientFolderId, rel: '' }];
+    for (let depth = 0; depth < 3 && level.length; depth++) {
+      const next = [];
+      for (const node of level) {
+        const kids = await listFolders(node.id);
+        for (const k of kids) {
+          const rel = node.rel ? node.rel + ' / ' + k.name : k.name;
+          if (match(k.name)) {
+            const years = (rel.match(/20\d\d/g) || []).map(Number);
+            hits.push({ id: k.id, path: rel, url: k.url, year: years.length ? Math.max.apply(null, years) : 0, depth: depth });
+          } else if (/clinic/i.test(k.name) || /20\d\d/.test(k.name)) {
+            next.push({ id: k.id, rel: rel });
+          }
+        }
+      }
+      level = next;
+    }
+    if (!hits.length) return null;
+    function rank(h) { return h.year === thisYear ? 3 : h.year === 0 ? 2 : 1; }
+    hits.sort(function(a, b) { return rank(b) - rank(a) || b.year - a.year || a.depth - b.depth; });
+    const best = hits[0];
+    best.stale = best.year !== 0 && best.year < thisYear;
+    return best;
+  }
+
+  function safeFileName(name, ext) {
+    let n = String(name || '').replace(/["*:<>?\/\\|#%~]/g, '-').replace(/\s+/g, ' ').trim().replace(/[. ]+$/, '');
+    if (!n) n = 'Document';
+    const re = new RegExp('\\.' + ext + '$', 'i');
+    if (!re.test(n)) n += '.' + ext;
+    return n;
+  }
+
+  async function fileExists(folderId, fileName) {
+    const d = await drive();
+    try {
+      await G('/drives/' + d + '/items/' + folderId + ':/' + encodeURIComponent(fileName) + '?$select=id');
+      return true;
+    } catch (err) {
+      if (isNotFound(err)) return false;
+      throw err;
+    }
+  }
+
+  // Replaces a file of the same name — SharePoint keeps the old one in version history.
+  async function upload(folderId, fileName, blob, contentType) {
+    const d = await drive();
+    return G('/drives/' + d + '/items/' + folderId + ':/' + encodeURIComponent(fileName) +
+             ':/content?@microsoft.graph.conflictBehavior=replace',
+             { method: 'PUT', body: blob, headers: { 'Content-Type': contentType || 'application/pdf' } });
+  }
+
+  // TRIAL: let SharePoint turn an HTML document into a PDF. The HTML is uploaded
+  // as a temporary file in the same folder, converted, then removed again.
+  async function htmlToPdf(folderId, html) {
+    const d = await drive();
+    const tmpName = '_odc-temp-' + Date.now() + '.html';
+    const tmp = await upload(folderId, tmpName, new Blob([html], { type: 'text/html' }), 'text/html');
+    let pdf = null, failure = null, leftover = null;
+    try {
+      const token = await ODC_CLOUD.getToken();
+      const r = await fetch('https://graph.microsoft.com/v1.0/drives/' + d + '/items/' + tmp.id + '/content?format=pdf',
+                            { headers: { 'Authorization': 'Bearer ' + token } });
+      if (!r.ok) throw new Error('SharePoint could not convert the document (' + r.status + ').');
+      const blob = await r.blob();
+      const head = new Uint8Array(await blob.slice(0, 5).arrayBuffer());
+      if (String.fromCharCode.apply(null, head) !== '%PDF-') throw new Error('SharePoint did not return a PDF.');
+      pdf = blob;
+    } catch (err) {
+      failure = err;
+    }
+    try { await G('/drives/' + d + '/items/' + tmp.id, { method: 'DELETE' }); }
+    catch (err) { leftover = tmpName; console.warn('Could not remove temporary file', tmpName, err); }
+    if (failure) { failure.leftover = leftover; throw failure; }
+    return { blob: pdf, leftover: leftover };
+  }
+
+  return {
+    drive: drive, searchFolders: searchFolders, listFolders: listFolders, getFolder: getFolder,
+    findDest: findDest, safeFileName: safeFileName, fileExists: fileExists, upload: upload,
+    htmlToPdf: htmlToPdf, isNotFound: isNotFound, _scoreFolder: scoreFolder,
+    get libraryUrl() { return _libUrl; }
+  };
+})();
+
+/* ---------- Plain document builder (for the trial automatic PDF) ----------
+   SharePoint's converter does not understand the app's screen layout (grids,
+   canvases, form controls), so the selected forms are re-written as a plain
+   document: headings, label/value tables, ticked boxes and signature images. */
+window.ODC_DOC = (function() {
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+  function multiline(s) { return esc(s).replace(/\r?\n/g, '<br>'); }
+  function dateOut(v) {
+    const m = String(v || '').match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    return m ? m[3] + '/' + m[2] + '/' + m[1] : v;
+  }
+  function controlValue(el) {
+    if (el.tagName === 'TEXTAREA') return multiline(el.value);
+    if (el.tagName === 'SELECT') {
+      const o = el.options[el.selectedIndex];
+      return o && el.value ? esc(o.textContent) : '';
+    }
+    const t = (el.getAttribute('type') || 'text').toLowerCase();
+    if (t === 'checkbox' || t === 'radio') return el.checked ? '&#9746;' : '&#9744;';
+    if (t === 'hidden' || t === 'file' || t === 'button' || t === 'submit') return '';
+    return esc(t === 'date' ? dateOut(el.value) : el.value);
+  }
+  // Signatures are drawn on a transparent canvas. Converters can turn the
+  // transparency black, so each one is first repainted onto a white background.
+  let _sigFlat = {};
+  function flattenSignature(dataUrl) {
+    return new Promise(function(resolve) {
+      const img = new Image();
+      img.onload = function() {
+        try {
+          const c = document.createElement('canvas');
+          c.width = img.naturalWidth || 600; c.height = img.naturalHeight || 110;
+          const g = c.getContext('2d');
+          g.fillStyle = '#ffffff'; g.fillRect(0, 0, c.width, c.height);
+          g.drawImage(img, 0, 0);
+          resolve({ src: c.toDataURL('image/png'), w: c.width, h: c.height });
+        } catch (e) { resolve({ src: dataUrl, w: 600, h: 110 }); }
+      };
+      img.onerror = function() { resolve(null); };
+      img.src = dataUrl;
+    });
+  }
+  function signature(key) {
+    const f = _sigFlat[key];
+    if (f) {
+      const w = 260, hgt = Math.max(30, Math.round(w * f.h / f.w));
+      return '<img src="' + esc(f.src) + '" width="' + w + '" height="' + hgt + '" alt="Signature"/>';
+    }
+    return '<span class="nosig">Not signed</span>';
+  }
+  const FT_OPEN = '<table class="ft" width="100%" border="1" cellspacing="0" cellpadding="4">';
+  const SKIP_TAGS = /^(SCRIPT|STYLE|BUTTON|CANVAS|NAV|NOSCRIPT|TEMPLATE|SVG)$/;
+  const SKIP_CLASS = ['no-print', 'sig-tools', 'sig-print-line', 'nav-row', 'step-meta', 'carryover-banner', 'ax-collapse-btn', 'modal-bg'];
+  const INLINE = /^(SPAN|STRONG|B|EM|I|SMALL|A|U|SUP|SUB)$/;
+
+  function kids(el, pre) {
+    let out = '';
+    for (const c of el.childNodes) out += ser(c, pre, false);
+    return out;
+  }
+  function ser(node, pre, isRoot) {
+    if (node.nodeType === 3) {
+      const t = node.nodeValue;
+      if (pre) return multiline(t);
+      return esc(t.replace(/\s+/g, ' '));
+    }
+    if (node.nodeType !== 1) return '';
+    const el = node, tag = el.tagName;
+    if (SKIP_TAGS.test(tag)) return '';
+    const cl = el.classList;
+    for (const c of SKIP_CLASS) { if (cl.contains(c)) return ''; }
+    // Hidden with an inline style = a conditional section that is switched off.
+    if (!isRoot && el.style && el.style.display === 'none') return '';
+    if (el.style && /pre/.test(el.style.whiteSpace || '')) pre = true;
+
+    if (cl.contains('page-head')) return '';           // screen-only page title
+    if (cl.contains('print-header')) {
+      const strong = el.querySelector('.ph-meta strong');
+      const ver = el.querySelector('.ph-ver');
+      const logo = (typeof LOGO_DATA === 'string' && LOGO_DATA) ? '<img src="' + esc(LOGO_DATA) + '" height="40" alt="ODC"/>' : '';
+      // Old-style width/bgcolor attributes as well as CSS classes: document
+      // converters honour the attributes far more reliably than a stylesheet.
+      return '<table class="hd" width="100%" border="0" cellspacing="0" cellpadding="6" bgcolor="#f1f7e8"><tr>' +
+             '<td class="hd-logo" width="16%" valign="middle">' + logo + '</td>' +
+             '<td class="hd-title" width="59%" valign="middle"><b><font size="4">' + esc(strong ? strong.textContent : '') + '</font></b><br>One Dream Community</td>' +
+             '<td class="hd-ver" width="25%" valign="middle" align="right"><b>' + esc(ver ? ver.textContent : '') + '</b></td></tr></table>';
+    }
+    if (el.hasAttribute('data-sigwrap')) return signature(el.getAttribute('data-sigwrap'));
+    if (tag === 'IMG') {
+      if (cl.contains('sig-print-img')) return el.dataset.sigimg ? signature(el.dataset.sigimg) : '';
+      const src = el.getAttribute('src') || '';
+      return src ? '<img src="' + esc(src) + '" height="48" alt=""/>' : '';
+    }
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') {
+      const v = controlValue(el);
+      const t = (el.getAttribute('type') || '').toLowerCase();
+      return (t === 'checkbox' || t === 'radio') ? v + ' ' : '<span class="v">' + (v || '&nbsp;') + '</span>';
+    }
+    // label + control pair  ->  one table row
+    if (cl.contains('field') && (tag === 'LABEL' || tag === 'DIV')) {
+      const first = el.firstElementChild;
+      if (first && first.tagName === 'SPAN') {
+        let rest = '';
+        for (const c of el.childNodes) { if (c !== first) rest += ser(c, pre, false); }
+        return FT_OPEN + '<tr><td class="l" width="32%" valign="top" bgcolor="#f1f7e8"><b>' + esc(first.textContent.trim()) +
+               '</b></td><td class="r" width="68%" valign="top">' + (rest.trim() || '&nbsp;') + '</td></tr></table>';
+      }
+    }
+    if (cl.contains('chk')) return '<span class="chk">' + kids(el, pre).trim() + '</span> &nbsp; ';
+    if (cl.contains('check-grid')) return '<p class="cg">' + kids(el, pre) + '</p>';
+    if (cl.contains('ver-tag') || cl.contains('auto-tag') || cl.contains('auto-flag')) return ' <small>[' + esc(el.textContent.trim()) + ']</small>';
+    if (/^H[1-6]$/.test(tag)) return '<' + tag.toLowerCase() + '>' + kids(el, pre) + '</' + tag.toLowerCase() + '>';
+    if (tag === 'BR') return '<br>';
+    if (tag === 'HR') return '<hr>';
+    if (tag === 'TABLE') return '<table class="t" width="100%" border="1" cellspacing="0" cellpadding="4">' + kids(el, pre) + '</table>';
+    if (/^(THEAD|TBODY|TFOOT|TR)$/.test(tag)) return '<' + tag.toLowerCase() + '>' + kids(el, pre) + '</' + tag.toLowerCase() + '>';
+    if (tag === 'TD' || tag === 'TH') {
+      const cs = el.getAttribute('colspan'), rs = el.getAttribute('rowspan');
+      return '<' + tag.toLowerCase() + (cs ? ' colspan="' + esc(cs) + '"' : '') + (rs ? ' rowspan="' + esc(rs) + '"' : '') + '>' +
+             (kids(el, pre).trim() || '&nbsp;') + '</' + tag.toLowerCase() + '>';
+    }
+    if (/^(UL|OL|LI|P)$/.test(tag)) return '<' + tag.toLowerCase() + '>' + kids(el, pre) + '</' + tag.toLowerCase() + '>';
+    if (INLINE.test(tag)) {
+      const inner = kids(el, pre);
+      if (!inner.trim()) return inner;
+      const t = (tag === 'A' || tag === 'SPAN') ? 'span' : tag.toLowerCase();
+      return '<' + t + '>' + inner + '</' + t + '>';
+    }
+    if (tag === 'LABEL') return '<p>' + kids(el, pre) + '</p>';
+    const inner = kids(el, pre);
+    if (!inner.trim()) return '';
+    if (cl.contains('card') || cl.contains('ax-block')) return '<div class="card">' + inner + '</div>';
+    if (cl.contains('sec-head')) return '<table class="sec" width="100%" border="0" cellspacing="0" cellpadding="4" bgcolor="#e6efdb"><tr><td>' + inner + '</td></tr></table>';
+    return '<div>' + inner + '</div>';
+  }
+
+  const CSS = [
+    '@page { size: A4; margin: 14mm 12mm 16mm 12mm; }',
+    'body { font-family: Arial, "Malgun Gothic", "Apple SD Gothic Neo", sans-serif; font-size: 10pt; color: #15291a; }',
+    'h1 { font-size: 16pt; margin: 0 0 4pt 0; color: #2f4a2a; }',
+    'h2 { font-size: 12pt; margin: 10pt 0 4pt 0; color: #2f4a2a; }',
+    'h3 { font-size: 11pt; margin: 8pt 0 3pt 0; color: #2f4a2a; }',
+    'h4 { font-size: 10pt; margin: 6pt 0 2pt 0; color: #2f4a2a; }',
+    'p { margin: 3pt 0; }',
+    'small { font-size: 8pt; color: #555555; }',
+    'table { border-collapse: collapse; width: 100%; }',
+    'table.hd { margin: 14pt 0 8pt 0; }',
+    'table.hd td { border-bottom: 2pt solid #4a7a3c; background-color: #f1f7e8; padding: 5pt; vertical-align: middle; }',
+    'td.hd-logo { width: 70pt; }',
+    'td.hd-title { font-size: 9pt; }',
+    'td.hd-title b { font-size: 14pt; }',
+    'td.hd-ver { width: 110pt; text-align: right; font-size: 9pt; font-weight: bold; }',
+    'table.ft td { border: 0.75pt solid #b9c9a8; padding: 3pt 5pt; vertical-align: top; }',
+    'table.ft td.l { width: 32%; background-color: #f1f7e8; font-weight: bold; font-size: 9pt; }',
+    'table.t td, table.t th { border: 0.75pt solid #b9c9a8; padding: 3pt 5pt; vertical-align: top; text-align: left; }',
+    'table.t th { background-color: #e6efdb; }',
+    'table.sec { margin: 8pt 0 4pt 0; }',
+    'table.sec h2, table.sec h3 { margin: 0; }',
+    'div.card { margin: 0 0 8pt 0; }',
+    'p.cg { margin: 3pt 0 5pt 0; }',
+    'span.nosig { color: #999999; font-style: italic; }',
+    'p.foot { margin-top: 14pt; font-size: 8pt; color: #666666; border-top: 0.75pt solid #b9c9a8; padding-top: 4pt; }'
+  ].join('\n');
+
+  // Same list of forms as the Print picker; uses the last print selection if there is one.
+  async function build() {
+    if (state.mode === 'new' || state.mode === 'annual') {
+      if (state.currentStep !== 'careplan' && typeof renderCarePlan === 'function') renderCarePlan();
+    }
+    const items = buildPrintItems();
+    const selc = (state.printSelection && Object.keys(state.printSelection).length) ? state.printSelection : null;
+    let chosen = items.filter(function(i) { return i.target && (!selc || selc[i.key]); });
+    if (!chosen.length) chosen = items.filter(function(i) { return i.target; });
+    _sigFlat = {};
+    const sigKeys = {};
+    chosen.forEach(function(it) {
+      it.target.querySelectorAll('[data-sigwrap],[data-sigimg]').forEach(function(n) {
+        sigKeys[n.getAttribute('data-sigwrap') || n.getAttribute('data-sigimg')] = true;
+      });
+    });
+    for (const key of Object.keys(sigKeys)) {
+      const data = state.data[key];
+      if (data && /^data:image\//.test(data)) {
+        const flat = await flattenSignature(data);
+        if (flat) _sigFlat[key] = flat;
+      }
+    }
+    let body = '';
+    chosen.forEach(function(it) {
+      const part = ser(it.target, false, true);
+      if (part.trim()) body += '<div class="doc-part">' + part + '</div>';
+    });
+    // Neighbouring label/value rows share one table.
+    body = body.split('</table>' + FT_OPEN).join('');
+    const D = state.data || {};
+    const me = (typeof ODC_CLOUD !== 'undefined' && ODC_CLOUD.getUser && ODC_CLOUD.getUser()) || {};
+    const who = me.name || me.email || '';
+    const when = new Date().toLocaleString('en-AU', { dateStyle: 'medium', timeStyle: 'short' });
+    const title = (D.p_name || 'Client').trim();
+    return {
+      count: chosen.length,
+      labels: chosen.map(function(i) { return i.label; }),
+      html: '<!DOCTYPE html><html><head><meta charset="utf-8"><title>' + esc(title) + '</title><style>' + CSS + '</style></head><body>' +
+            body +
+            '<p class="foot">' + esc(title) + ' — created from the ODC Care Plan Workflow on ' + esc(when) + (who ? ' by ' + esc(who) : '') + '.</p>' +
+            '</body></html>'
+    };
+  }
+  return { build: build };
+})();
+
+/* ---------- "Save to client folder" dialog ---------- */
+window.ODC_FILES_UI = (function() {
+  const $ = function(id) { return document.getElementById(id); };
+  const PREF_KEY = 'odc_sp_after_print';
+  let kind = 'care';        // care | interim | initial | assessment
+  let dest = null;          // { id, path, url, stale, manual }
+  let busy = false;
+  let fromPrint = false;
+  const destCache = {};     // clientFolderId + '|' + kind -> dest
+
+  function h(s) { return escHtml(String(s == null ? '' : s)); }
+  function link() { return (state.data && state.data._spFiles) || null; }
+  function saveLink(l) {
+    if (l) state.data._spFiles = l; else delete state.data._spFiles;
+    autoSave();
+  }
+  function status(type, html) {
+    const el = $('spStatus');
+    el.className = 'sp-status' + (type ? ' ' + type : '');
+    el.innerHTML = html || '';
+  }
+  function promptPref() {
+    try { return localStorage.getItem(PREF_KEY) !== '0'; } catch (e) { return true; }
+  }
+  function today() {
+    const d = new Date();
+    return ('0' + d.getDate()).slice(-2) + '.' + ('0' + (d.getMonth() + 1)).slice(-2) + '.' + d.getFullYear();
+  }
+  const KIND_LABEL = { care: 'Care plan', interim: 'Interim care plan', initial: 'Initial assessment', assessment: 'Annual / other assessment' };
+  function defaultName(k) {
+    const base = k === 'interim' ? 'Interim Care Plan' : k === 'initial' ? 'Initial Assessment' : k === 'assessment' ? 'Assessment' : 'Care plan';
+    return base + '_' + today() + '.pdf';
+  }
+  // Best guess at what was just printed, from the last print selection.
+  function guessKind() {
+    const s = state.printSelection || {};
+    const keys = Object.keys(s).filter(function(k) { return s[k]; });
+    if (!keys.length || keys.some(function(k) { return k.indexOf('cp_') === 0; })) return 'care';
+    if (keys.every(function(k) { return k === 'interim_cp'; })) return 'interim';
+    if (keys.indexOf('initial') >= 0) return 'initial';
+    if (keys.indexOf('annual') >= 0 || keys.some(function(k) { return k.indexOf('ax_') === 0; })) return 'assessment';
+    return 'care';
+  }
+  function errText(err) {
+    const m = String((err && err.message) || err);
+    if (/Graph 403/.test(m)) return 'Your account does not have permission for the client files library. (' + h(m.slice(0, 160)) + ')';
+    if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'Could not reach SharePoint — check the internet connection and try again.';
+    return h(m.slice(0, 300));
+  }
+
+  /* ----- step 1: find the client's folder ----- */
+  async function showFind() {
+    const name = (state.data.p_name || '').trim();
+    $('spIntro').textContent = 'First, link this client to their folder in “ODC Home Care Clients”. This is only needed once per client.';
+    status('', '');
+    if (!name) {
+      $('spBody').innerHTML = '<p style="font-size:13.5px">Enter the participant name in the assessment first, or pick the folder by hand.</p>' +
+        '<button class="btn ghost" id="spBrowseLib">Browse the library…</button>';
+      $('spBrowseLib').onclick = function() { showBrowse('client', null, []); };
+      return;
+    }
+    $('spBody').innerHTML = '<p style="font-size:13.5px">Looking for <strong>' + h(name) + '</strong>…</p>';
+    let results;
+    try { results = await ODC_FILES.searchFolders(name, state.data.p_dob); }
+    catch (err) {
+      $('spBody').innerHTML = '<button class="btn ghost" id="spRetryFind">Try again</button>';
+      $('spRetryFind').onclick = showFind;
+      status('err', errText(err));
+      return;
+    }
+    if ($('spSaveModal').style.display === 'none' || link()) return;
+    let html = '';
+    if (results.length) {
+      html += '<p style="font-size:13.5px;margin-bottom:0">Which folder belongs to <strong>' + h(name) + '</strong>?</p><div class="sp-list">' +
+        results.slice(0, 12).map(function(r, i) {
+          return '<button class="sp-item" data-i="' + i + '">📁 ' + h(r.name) + (r.path ? '<small>in ' + h(r.path) + '</small>' : '') + '</button>';
+        }).join('') + '</div>';
+    } else {
+      html += '<p style="font-size:13.5px">No folder matching <strong>' + h(name) + '</strong> was found. The folder name must contain the participant name as typed in the assessment.</p>';
+    }
+    html += '<button class="sp-link" id="spBrowseLib">' + (results.length ? 'None of these — browse the library' : 'Browse the library…') + '</button>';
+    $('spBody').innerHTML = html;
+    $('spBody').querySelectorAll('.sp-item').forEach(function(b) {
+      b.onclick = function() {
+        const r = results[Number(b.dataset.i)];
+        saveLink({ folderId: r.id, folderName: r.name, folderPath: r.path, folderUrl: r.url });
+        showSave();
+      };
+    });
+    $('spBrowseLib').onclick = function() { showBrowse('client', null, []); };
+  }
+
+  /* ----- folder browser (pick the client folder, or change the destination) ----- */
+  // trail: [{id, name, url}] from the starting point down to the folder being shown.
+  async function showBrowse(purpose, rootId, trail) {
+    const cur = trail.length ? trail[trail.length - 1] : null;
+    const curId = cur ? cur.id : rootId;
+    const here = trail.map(function(t) { return t.name; }).join(' / ') || (purpose === 'client' ? 'ODC Home Care Clients' : (link() || {}).folderName || '');
+    $('spIntro').textContent = purpose === 'client' ? 'Open the client’s own folder, then choose “Use this folder”.' : 'Choose the folder this document should be saved into.';
+    status('', '');
+    $('spBody').innerHTML = '<p style="font-size:13.5px">Opening <strong>' + h(here) + '</strong>…</p>';
+    let folders;
+    try { folders = await ODC_FILES.listFolders(curId); }
+    catch (err) { status('err', errText(err)); $('spBody').innerHTML = '<button class="btn ghost" id="spBack">Back</button>'; $('spBack').onclick = function() { link() ? showSave() : showFind(); }; return; }
+    const canUse = purpose === 'client' ? !!cur : true;
+    $('spBody').innerHTML =
+      '<p style="font-size:13.5px;margin-bottom:0">📂 <strong>' + h(here) + '</strong></p>' +
+      '<div class="sp-list">' +
+        (trail.length ? '<button class="sp-item" id="spUp">⬆ Up one level</button>' : '') +
+        (folders.length ? folders.map(function(f, i) { return '<button class="sp-item" data-i="' + i + '">📁 ' + h(f.name) + '</button>'; }).join('')
+                        : '<div class="sp-item" style="cursor:default;color:var(--ink-muted)">No sub-folders here.</div>') +
+      '</div>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end">' +
+        '<button class="btn ghost" id="spBack">Cancel</button>' +
+        (canUse ? '<button class="btn" id="spUse">Use this folder</button>' : '') +
+      '</div>';
+    $('spBody').querySelectorAll('.sp-item[data-i]').forEach(function(b) {
+      b.onclick = function() { showBrowse(purpose, rootId, trail.concat([folders[Number(b.dataset.i)]])); };
+    });
+    if ($('spUp')) $('spUp').onclick = function() { showBrowse(purpose, rootId, trail.slice(0, -1)); };
+    $('spBack').onclick = function() { link() ? showSave() : showFind(); };
+    if ($('spUse')) $('spUse').onclick = function() {
+      if (purpose === 'client') {
+        saveLink({ folderId: cur.id, folderName: cur.name, folderPath: trail.slice(0, -1).map(function(t) { return t.name; }).join('/'), folderUrl: cur.url });
+      } else {
+        const l = Object.assign({}, link());
+        const chosen = cur ? { id: cur.id, path: trail.map(function(t) { return t.name; }).join(' / '), url: cur.url, manual: true }
+                           : { id: l.folderId, path: '', url: l.folderUrl, manual: true };
+        l.dest = Object.assign({}, l.dest || {});
+        l.dest[kind] = chosen;
+        saveLink(l);
+      }
+      showSave();
+    };
+  }
+
+  /* ----- step 2: save ----- */
+  async function resolveDest() {
+    const l = link();
+    if (l.dest && l.dest[kind]) return l.dest[kind];           // chosen by hand earlier
+    const key = l.folderId + '|' + kind;
+    if (destCache[key]) return destCache[key];
+    const found = await ODC_FILES.findDest(l.folderId, kind);
+    const d = found || { id: l.folderId, path: '', url: l.folderUrl, notFound: true };
+    destCache[key] = d;
+    return d;
+  }
+
+  async function showSave() {
+    const l = link();
+    dest = null;
+    $('spIntro').textContent = fromPrint
+      ? 'Saved the PDF from the print window? Drop it below and it is filed in the client’s folder.'
+      : 'Print → “Save as PDF”, then drop the PDF below. It is filed in the client’s folder with the standard name.';
+    $('spBody').innerHTML =
+      '<div class="sp-row"><span class="lbl">Client folder</span><span class="val">' +
+        (l.folderUrl ? '<a href="' + h(l.folderUrl) + '" target="_blank" rel="noopener">' + h(l.folderName) + '</a>' : h(l.folderName)) +
+        (l.folderPath ? '<small>in ' + h(l.folderPath) + '</small>' : '') + '</span>' +
+        '<button class="sp-link" id="spRelink">Change</button></div>' +
+      '<div class="sp-row"><span class="lbl">Document</span><span class="val"><select id="spKind">' +
+        Object.keys(KIND_LABEL).map(function(k) { return '<option value="' + k + '"' + (k === kind ? ' selected' : '') + '>' + KIND_LABEL[k] + '</option>'; }).join('') +
+        '</select></span><span></span></div>' +
+      '<div class="sp-row"><span class="lbl">Save into</span><span class="val" id="spDest">Finding the folder…</span>' +
+        '<button class="sp-link" id="spDestChange">Change</button></div>' +
+      '<div class="sp-row"><span class="lbl">File name</span><span class="val"><input type="text" id="spName" value="' + h(defaultName(kind)) + '"/></span><span></span></div>' +
+      '<div class="sp-drop" id="spDrop"><strong>Drop the saved PDF here</strong><span>or click to choose it from your computer</span></div>' +
+      '<div class="sp-auto">No PDF yet? <button class="sp-link" id="spAuto">Create one automatically (trial)</button> — skips the print window, but the layout is plainer than the printed version. Check the result before relying on it.</div>';
+
+    $('spRelink').onclick = function() {
+      if (!confirm('Link this client to a different SharePoint folder?')) return;
+      saveLink(null); showFind();
+    };
+    $('spKind').onchange = function() {
+      const prevDefault = defaultName(kind);
+      const nameEl = $('spName');
+      const untouched = nameEl.value === prevDefault;
+      kind = this.value;
+      if (untouched) nameEl.value = defaultName(kind);
+      loadDest();
+    };
+    $('spDestChange').onclick = function() { showBrowse('dest', l.folderId, []); };
+    const drop = $('spDrop');
+    drop.onclick = function() { if (!busy) { $('spFile').value = ''; $('spFile').click(); } };
+    drop.ondragover = function(e) { e.preventDefault(); drop.classList.add('over'); };
+    drop.ondragleave = function() { drop.classList.remove('over'); };
+    drop.ondrop = function(e) {
+      e.preventDefault(); drop.classList.remove('over');
+      const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+      if (f) saveFile(f);
+    };
+    $('spAuto').onclick = autoCreate;
+    status('', '');
+    loadDest();
+  }
+
+  async function loadDest() {
+    const l = link();
+    const mine = kind;
+    dest = null;
+    const el = $('spDest');
+    if (!el) return;
+    el.textContent = 'Finding the folder…';
+    try {
+      const d = await resolveDest();
+      if (!$('spDest') || mine !== kind) return;
+      dest = d;
+      let txt = h(l.folderName) + (d.path ? ' / ' + h(d.path) : '');
+      if (d.url) txt = '<a href="' + h(d.url) + '" target="_blank" rel="noopener">' + txt + '</a>';
+      if (d.notFound) txt += '<small>No “' + h(KIND_LABEL[kind]) + '” sub-folder was found, so the client’s main folder is used. Use Change to pick another.</small>';
+      else if (d.stale) txt += '<small>⚠ This is the ' + d.year + ' folder — no ' + new Date().getFullYear() + ' folder was found. Use Change if it should go elsewhere.</small>';
+      else if (d.manual) txt += '<small>Chosen by hand for this client. <button class="sp-link" id="spDestAuto">Find automatically instead</button></small>';
+      $('spDest').innerHTML = txt;
+      if ($('spDestAuto')) $('spDestAuto').onclick = function() {
+        const nl = Object.assign({}, link());
+        nl.dest = Object.assign({}, nl.dest || {});
+        delete nl.dest[kind];
+        saveLink(nl);
+        loadDest();
+      };
+    } catch (err) {
+      if (!$('spDest')) return;
+      if (ODC_FILES.isNotFound(err)) {
+        $('spDest').innerHTML = '<small>The linked folder no longer exists (moved or renamed?). Use Change next to “Client folder” to link it again.</small>';
+      } else {
+        $('spDest').textContent = 'Could not open the folder.';
+      }
+      status('err', errText(err));
+    }
+  }
+
+  function setBusy(b) {
+    busy = b;
+    const drop = $('spDrop');
+    if (drop) drop.style.opacity = b ? '.5' : '';
+    ['spAuto', 'spKind', 'spName', 'spDestChange', 'spRelink'].forEach(function(id) { if ($(id)) $(id).disabled = b; });
+  }
+
+  // Uploads a PDF (dropped by the user, or made by the trial converter).
+  async function saveBlob(blob, note) {
+    if (!dest) { status('err', 'The destination folder is not ready yet — wait a moment and try again.'); return false; }
+    const l = link();
+    const name = ODC_FILES.safeFileName($('spName').value, 'pdf');
+    $('spName').value = name;
+    if (await ODC_FILES.fileExists(dest.id, name)) {
+      if (!confirm('“' + name + '” is already in this folder.\n\nReplace it? (SharePoint keeps the earlier one in the file’s version history.)\n\nPress Cancel to change the file name instead.')) {
+        status('info', 'Not saved. Change the file name, then drop the PDF again.');
+        return false;
+      }
+    }
+    status('info', 'Saving “' + h(name) + '”…');
+    const item = await ODC_FILES.upload(dest.id, name, blob, 'application/pdf');
+    const where = h(l.folderName) + (dest.path ? ' / ' + h(dest.path) : '');
+    status('ok', '✓ Saved <strong>' + h(name) + '</strong> in ' + where + '. ' +
+      (item && item.webUrl ? '<a href="' + h(item.webUrl) + '" target="_blank" rel="noopener">Open the PDF</a>' : '') +
+      (dest.url ? ' · <a href="' + h(dest.url) + '" target="_blank" rel="noopener">Open the folder</a>' : '') +
+      (note ? '<br>' + note : ''));
+    const nl = Object.assign({}, link());
+    nl.last = { name: name, at: Date.now(), url: (item && item.webUrl) || '' };
+    saveLink(nl);
+    return true;
+  }
+
+  async function saveFile(file) {
+    if (busy) return;
+    const isPdf = /\.pdf$/i.test(file.name || '') || file.type === 'application/pdf';
+    if (!isPdf) { status('err', 'That is not a PDF. In the print window choose “Save as PDF”, then drop that file here.'); return; }
+    if (file.size > 200 * 1024 * 1024) { status('err', 'That file is over 200 MB — too large to save from here.'); return; }
+    if (file.size === 0) { status('err', 'That file is empty.'); return; }
+    setBusy(true);
+    try { await saveBlob(file, ''); }
+    catch (err) { console.error('Save to client folder failed:', err); status('err', 'Not saved. ' + errText(err)); }
+    finally { setBusy(false); }
+  }
+
+  // TRIAL — build a plain document from the selected forms and let SharePoint make the PDF.
+  async function autoCreate() {
+    if (busy) return;
+    if (!dest) { status('err', 'The destination folder is not ready yet — wait a moment and try again.'); return; }
+    setBusy(true);
+    try {
+      status('info', 'Building the document…');
+      const doc = await ODC_DOC.build();
+      if (!doc.count) { status('err', 'There is nothing to put in the document yet.'); return; }
+      status('info', 'SharePoint is creating the PDF (' + doc.count + ' form' + (doc.count === 1 ? '' : 's') + ')… this can take up to a minute.');
+      const out = await ODC_FILES.htmlToPdf(dest.id, doc.html);
+      await saveBlob(out.blob,
+        'Created automatically (trial) — open it and check the content and signatures before relying on it.' +
+        (out.leftover ? ' A temporary file “' + h(out.leftover) + '” could not be removed from the folder; please delete it.' : ''));
+    } catch (err) {
+      console.error('Automatic PDF failed:', err);
+      status('err', 'The automatic PDF did not work. ' + errText(err) +
+        '<br>Use Print → “Save as PDF” and drop the file above instead.' +
+        (err && err.leftover ? '<br>A temporary file “' + h(err.leftover) + '” could not be removed from the folder; please delete it.' : ''));
+    } finally { setBusy(false); }
+  }
+
+  function open(afterPrint) {
+    const signedIn = typeof ODC_CLOUD !== 'undefined' && ODC_CLOUD.getUser && ODC_CLOUD.getUser();
+    if (!state.mode || !signedIn) {
+      if (!afterPrint) alert(!state.mode ? 'Open a client first.' : 'Sign in first.');
+      return;
+    }
+    fromPrint = !!afterPrint;
+    kind = guessKind();
+    $('spAfterPrint').checked = promptPref();
+    $('spSaveModal').style.display = 'flex';
+    if (link() && link().folderId) showSave(); else showFind();
+  }
+  function close() { $('spSaveModal').style.display = 'none'; }
+
+  function init() {
+    if (!$('spSaveModal')) return;
+    $('btnSpSave').addEventListener('click', function() { open(false); });
+    $('spClose').addEventListener('click', close);
+    $('spSaveModal').addEventListener('click', function(e) { if (e.target === $('spSaveModal') && !busy) close(); });
+    $('spFile').addEventListener('change', function() { if (this.files && this.files[0]) saveFile(this.files[0]); });
+    $('spAfterPrint').addEventListener('change', function() {
+      try { localStorage.setItem(PREF_KEY, this.checked ? '1' : '0'); } catch (e) {}
+    });
+    // Dropping a file anywhere else on the page must not navigate away from the form.
+    window.addEventListener('dragover', function(e) { if ($('spSaveModal').style.display !== 'none') e.preventDefault(); });
+    window.addEventListener('drop', function(e) { if ($('spSaveModal').style.display !== 'none') e.preventDefault(); });
+    // After a print started from the app, offer to file the PDF that was just saved.
+    window.addEventListener('afterprint', function() {
+      if (!window.__odcPrintViaApp) return;
+      window.__odcPrintViaApp = false;
+      if (!promptPref()) return;
+      setTimeout(function() { open(true); }, 900);
+    });
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+
+  return { open: open, close: close };
 })();
 </script>
 </body>
