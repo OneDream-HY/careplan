@@ -68,6 +68,13 @@
       sitePath:    '/sites/AgedCareTeam622',
       libraryName: 'ODC Home Care  Clients',
       driveId:     'b!I0bis5wgzk-JzgADzP8AlM-JoBNOh31Ov6V81jmvQvPTCssh40DySJzey3au5DT7'
+    },
+    // The Service Agreement app (signed first): where its saved records live,
+    // and its address — used to bring participant details across and to open it.
+    agreements: {
+      sitePath: '/sites/AgedCareTeam622',
+      folder:   'Service Agreement Records',
+      appUrl:   'https://onedream-hy.github.io/contract-client/'
     }
   };
 </script>
@@ -1129,6 +1136,7 @@ window.ODC_CLOUD = (function() {
       <button class="mini-btn" id="btnEmailCoord" title="Email the care plan to this client's coordinator">📧 Email</button>
       <button class="mini-btn primary" id="btnPrint">🖨 Print…</button>
       <button class="mini-btn" id="btnSpSave" title="File the PDF in this client's SharePoint folder">☁ Save to client folder</button>
+      <button class="mini-btn" id="btnAgreement" title="This client's Service Agreement — open it, or copy the participant details from it">📄 Agreement</button>
     </div>
   </div>
 </header>
@@ -1540,6 +1548,11 @@ window.ODC_CLOUD = (function() {
         <p>Annual Assessment & Planning bundle for low-level, non-complex clients. FRAT and Comprehensive Ax done separately as required.</p>
       </div>
     </div>
+    <button type="button" class="ag-start" id="btnFromAgreement">
+      <span class="ic">📄</span>
+      <span class="tx"><strong>Start from a signed Service Agreement</strong><span>Pick the client’s agreement — name, date of birth, contacts and SharePoint folder are filled in for you.</span></span>
+      <span class="arrow">→</span>
+    </button>
     <p style="margin-top:14px; font-size:12px; color:var(--ink-muted);">All progress is auto-saved per client on this device. Use <strong>Save JSON</strong> in the top bar to back up to a file or share with another device.</p>
   </div>
 </div>
@@ -6357,6 +6370,551 @@ window.ODC_FILES_UI = (function() {
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 
   return { open: open, close: close };
+})();
+</script>
+<!-- ============================================================
+     LINK TO THE SERVICE AGREEMENT APP (v2.3)
+     The Service Agreement is signed first, so its saved record is the source
+     of the participant's details. This block reads those records (Aged Care
+     Team site → "Service Agreement Records") with the same sign-in and
+     permission the app already uses, and:
+       • starts a care plan from an agreement with the details filled in
+       • links an open client to their agreement, shows its status and opens it
+       • opens the right client when arriving from the agreement app
+         (careplan/?sa=<record file>)
+     The link is stored with the client in state.data._agreement. When the
+     agreement record names the client's SharePoint folder, that folder link
+     (state.data._spFiles) is filled in too, so it need not be confirmed again.
+     ============================================================ -->
+<style>
+  #agModal .ag-list { margin: 10px 0; max-height: 320px; overflow-y: auto; border: 1px solid var(--line); border-radius: 6px; }
+  #agModal .ag-item { display: flex; width: 100%; align-items: center; gap: 10px; text-align: left; background: #fff; border: 0; border-bottom: 1px solid var(--line); padding: 9px 12px; cursor: pointer; font: inherit; font-size: 13.5px; }
+  #agModal .ag-item:last-child { border-bottom: 0; }
+  #agModal .ag-item:hover { background: var(--accent-light); }
+  #agModal .ag-item .nm { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  #agModal .ag-item small { display: block; color: var(--ink-muted); font-size: 11.5px; }
+  #agModal .ag-search { width: 100%; padding: 8px 12px; border: 1px solid var(--line); border-radius: 6px; font: inherit; font-size: 14px; }
+  #agModal .ag-card { border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; margin: 10px 0; background: #fbfcf8; font-size: 13.5px; }
+  #agModal .ag-card strong.t { display: block; font-size: 15px; margin-bottom: 2px; }
+  #agModal .ag-card small { color: var(--ink-muted); }
+  #agModal table.ag-fields { width: 100%; border-collapse: collapse; margin: 8px 0 4px; font-size: 13.5px; }
+  #agModal table.ag-fields td { padding: 6px 6px; border-bottom: 1px dashed var(--line); vertical-align: top; overflow-wrap: anywhere; }
+  #agModal table.ag-fields td.l { width: 34%; color: var(--ink-muted); font-size: 12px; text-transform: uppercase; letter-spacing: .03em; font-weight: 600; }
+  #agModal table.ag-fields td.c { width: 26px; }
+  #agModal table.ag-fields small { display: block; color: #8a5a12; font-size: 11.5px; }
+  #agModal .ag-note { font-size: 12.5px; color: var(--ink-muted); margin: 6px 0; }
+  #agModal .ag-warn { font-size: 12.5px; color: #7a4a1a; background: #fff8e6; border: 1px solid #e8d49b; border-radius: 6px; padding: 8px 10px; margin: 8px 0; }
+  #agModal .ag-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  #agModal .ag-link { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font: inherit; font-size: 12.5px; text-decoration: underline; }
+  #agModal .ag-status { margin-top: 12px; padding: 10px 12px; border-radius: 6px; font-size: 13px; display: none; overflow-wrap: anywhere; }
+  #agModal .ag-status.info { display: block; background: #f4f6ee; color: var(--ink-soft); }
+  #agModal .ag-status.err { display: block; background: #fbe9e1; color: #8a2f12; }
+  .ag-start { display: flex; align-items: center; gap: 12px; width: 100%; margin-top: 14px; padding: 14px 18px; text-align: left; background: #f3f8fc; border: 1px solid #b9d3ea; border-radius: 6px; cursor: pointer; font: inherit; transition: all .15s; }
+  .ag-start:hover { border-color: #0078d4; background: #e6f1fb; }
+  .ag-start .ic { font-size: 22px; line-height: 1; }
+  .ag-start .tx { flex: 1; }
+  .ag-start .tx strong { display: block; color: #0b4a8a; font-size: 15px; }
+  .ag-start .tx span { font-size: 13px; color: var(--ink-soft); }
+  .ag-start .arrow { color: #0078d4; font-size: 20px; }
+  #agToast { position: fixed; top: 16px; right: 16px; z-index: 100000; max-width: 380px; padding: 12px 16px; border-radius: 8px; background: #eef9ea; border: 1px solid #4a7a3c; color: #2f4a2a; font-size: 13.5px; line-height: 1.45; box-shadow: 0 6px 20px rgba(0,0,0,.18); display: none; }
+</style>
+
+<div class="modal-bg no-print" id="agModal" style="display:none;z-index:120">
+  <div class="modal" style="max-width:640px;max-height:90vh;overflow-y:auto;padding:24px">
+    <h2 class="serif" style="margin:0 0 4px">Service <em>Agreement</em></h2>
+    <p id="agIntro" style="margin:0 0 6px;font-size:13.5px;color:var(--ink-soft)"></p>
+    <div id="agBody"></div>
+    <div class="ag-status" id="agStatus"></div>
+    <div style="display:flex;justify-content:flex-end;margin-top:16px;border-top:1px solid var(--line);padding-top:12px">
+      <button class="btn ghost" id="agClose">Close</button>
+    </div>
+  </div>
+</div>
+<div id="agToast" class="no-print"></div>
+
+<script>
+window.ODC_AGREEMENT = (function() {
+  const cfg = window.ODC_CLOUD_CONFIG || {};
+  const AG = Object.assign({
+    sitePath: '/sites/AgedCareTeam622',                         // site the agreement app saves to
+    folder:   'Service Agreement Records',                      // folder in that site's Documents library
+    appUrl:   'https://onedream-hy.github.io/contract-client/'  // the agreement app
+  }, cfg.agreements || {});
+  const PENDING_KEY = 'odc_cp_from_agreement';
+  const $ = function(id) { return document.getElementById(id); };
+  let _driveId = null;
+  let _list = null;
+  let _seq = 0;          // guards against a slow request painting over a newer screen
+
+  function G(path, options) { return ODC_CLOUD.graph(path, options); }
+  function h(s) { return escHtml(String(s == null ? '' : s)); }
+  function norm(s) { return String(s == null ? '' : s).toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ''); }
+  function encPath(p) { return String(p).split('/').filter(function(x) { return x.length; }).map(encodeURIComponent).join('/'); }
+  function isNotFound(err) { return /Graph 404/.test(String(err && err.message)); }
+  function errText(err) {
+    const m = String((err && err.message) || err);
+    if (/Graph 403/.test(m)) return 'Your account does not have permission for the Service Agreement records. (' + h(m.slice(0, 160)) + ')';
+    if (/Failed to fetch|NetworkError|Load failed/i.test(m)) return 'Could not reach SharePoint — check the internet connection and try again.';
+    return h(m.slice(0, 300));
+  }
+  function status(type, html) {
+    const el = $('agStatus');
+    el.className = 'ag-status' + (type ? ' ' + type : '');
+    el.innerHTML = html || '';
+  }
+  function toast(html) {
+    const t = $('agToast');
+    if (!t) return;
+    t.innerHTML = html;
+    t.style.display = 'block';
+    clearTimeout(toast._t);
+    toast._t = setTimeout(function() { t.style.display = 'none'; }, 7000);
+  }
+  function when(iso) {
+    if (!iso) return '';
+    try { return new Date(iso).toLocaleString(undefined, { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' }); }
+    catch (e) { return String(iso); }
+  }
+  function dmy(v) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(v || '');
+    return m ? m[3] + '/' + m[2] + '/' + m[1] : (v || '');
+  }
+
+  /* ---------- reading the agreement records ---------- */
+  async function drive() {
+    if (_driveId) return _driveId;
+    let site;
+    try { site = await G('/sites/' + cfg.spHostname + ':' + AG.sitePath); }
+    catch (err) { throw new Error('Could not open the Service Agreement site (' + AG.sitePath + '). Your account may not have access to it. [' + (err.message || err) + ']'); }
+    const d = await G('/sites/' + site.id + '/drive?$select=id');
+    _driveId = d.id;
+    return _driveId;
+  }
+
+  // "ODC-Agreement_Mary-Smith.json" -> "Mary Smith"; drafts saved without a name -> ''
+  function clientFromFile(name) {
+    const m = /^ODC-Agreement_(.+)\.json$/i.exec(String(name || ''));
+    if (!m || /^Untitled-by-/i.test(m[1])) return '';
+    return m[1].replace(/-+/g, ' ').trim();
+  }
+
+  async function list(force) {
+    if (_list && !force) return _list;
+    const d = await drive();
+    let url = '/drives/' + d + '/root:/' + encPath(AG.folder) + ':/children?$top=200&$orderby=lastModifiedDateTime desc' +
+              '&$select=id,name,file,lastModifiedDateTime,lastModifiedBy';
+    const out = [];
+    for (let page = 0; url && page < 15; page++) {
+      const r = await G(url);
+      (r.value || []).forEach(function(it) {
+        if (!it.file || !/\.json$/i.test(it.name || '')) return;
+        const client = clientFromFile(it.name);
+        if (!client) return;
+        out.push({
+          id: it.id, name: it.name, client: client, modified: it.lastModifiedDateTime,
+          by: (it.lastModifiedBy && it.lastModifiedBy.user && (it.lastModifiedBy.user.displayName || it.lastModifiedBy.user.email)) || ''
+        });
+      });
+      url = r['@odata.nextLink'] || null;
+    }
+    out.sort(function(a, b) { return String(b.modified || '').localeCompare(String(a.modified || '')); });
+    _list = out;
+    return out;
+  }
+
+  // ref: { id } or { name }  ->  { meta, record }
+  async function read(ref) {
+    const d = await drive();
+    // No $select here: it would strip the pre-signed download link from the reply.
+    const meta = await G(ref.id ? '/drives/' + d + '/items/' + ref.id
+                                : '/drives/' + d + '/root:/' + encPath(AG.folder + '/' + ref.name));
+    const dl = meta['@microsoft.graph.downloadUrl'] || meta['@content.downloadUrl'];
+    if (!dl) throw new Error('SharePoint did not give a download link for ' + (meta.name || 'the agreement record') + '.');
+    const res = await fetch(dl);
+    if (!res.ok) throw new Error('Could not download the agreement record (' + res.status + ').');
+    return { meta: meta, record: await res.json() };
+  }
+
+  // "Jane Kim (daughter) 0412 345 678" -> { name: 'Jane Kim', rel: 'daughter', phone: '0412 345 678' }
+  function splitContact(text) {
+    let t = String(text || '').trim();
+    const out = { name: '', rel: '', phone: '' };
+    if (!t) return out;
+    const ph = t.match(/\+?\(?\d[\d\s().\-]{6,}\d/);
+    if (ph) { out.phone = ph[0].trim(); t = t.replace(ph[0], ' '); }
+    const rel = t.match(/\(([^()\d]{2,40})\)/);
+    if (rel) { out.rel = rel[1].trim(); t = t.replace(rel[0], ' '); }
+    out.name = t.replace(/\b(ph|phone|mob|mobile|tel|m|p)\s*[:.]?\s*$/i, ' ')
+                .replace(/[\s,;:\/|–—-]+$/g, '').replace(/^[\s,;:\/|–—-]+/g, '').replace(/\s{2,}/g, ' ').trim();
+    return out;
+  }
+
+  // Records saved before the two apps were linked hold the form by position only.
+  // The first twelve boxes of the agreement form have always been the participant's
+  // details, so read those — but only if they look right, and never guess further.
+  function legacyParticipant(values, fileClient) {
+    const only = { name: fileClient };
+    if (!Array.isArray(values) || values.length < 12) return { p: only, full: false };
+    const v = values.slice(0, 12);
+    if (v.some(function(x) { return typeof x !== 'string'; })) return { p: only, full: false };
+    const okName = v[0].trim() && fileClient && (norm(v[0]).indexOf(norm(fileClient)) === 0 || norm(fileClient).indexOf(norm(v[0])) === 0);
+    const okDob = v[1] === '' || /^\d{4}-\d{2}-\d{2}$/.test(v[1]);
+    const okEmail = v[5] === '' || /@/.test(v[5]);
+    const okPost = v[8] === '' || /^\d{3,4}$/.test(v[8].trim());
+    const okPhones = [v[3], v[4]].every(function(x) { return x === '' || (/\d{6}/.test(x.replace(/\D/g, '')) && !/@/.test(x)); });
+    if (!(okName && okDob && okEmail && okPost && okPhones)) return { p: only, full: false };
+    return { full: true, p: {
+      name: v[0].trim(), dob: v[1], acId: v[2].trim(), mobile: v[3].trim(), phone: v[4].trim(), email: v[5].trim(),
+      street: v[6].trim(), suburb: v[7].trim(), postcode: v[8].trim(), emergency: v[9].trim(), alt1: v[10].trim(), alt2: v[11].trim()
+    } };
+  }
+
+  function extract(record, meta) {
+    record = record || {};
+    const fileClient = clientFromFile(meta.name);
+    const info = {
+      fileName: meta.name, fileId: meta.id,
+      savedAt: record.savedAt || meta.lastModifiedDateTime || '',
+      savedBy: record.savedBy || '',
+      agreement: (record.agreement && typeof record.agreement === 'object') ? record.agreement : null,
+      clientFolder: null, participant: null, source: 'named'
+    };
+    const cf = record.clientFolder || (record.doc && record.doc.__spClient) || null;
+    if (cf && cf.id && cf.name) info.clientFolder = { id: cf.id, name: cf.name, path: cf.path || '', url: cf.url || '' };
+    if (record.participant && typeof record.participant === 'object' && String(record.participant.name || '').trim()) {
+      info.participant = record.participant;
+    } else {
+      const lg = legacyParticipant(record.values, fileClient);
+      info.participant = lg.p;
+      info.source = lg.full ? 'legacy' : 'name-only';
+    }
+    const sig = record.sig || {};
+    info.signed = info.agreement && typeof info.agreement.signed === 'boolean'
+      ? info.agreement.signed
+      : !!((sig.client || sig.rep) && (((sig.aClient || []).length + (sig.aRep || []).length) > 0));
+    return info;
+  }
+
+  // Agreement details -> the care plan's own field names. Only like-for-like fields.
+  function mapRows(p) {
+    p = p || {};
+    const phones = [p.mobile, p.phone].map(function(x) { return String(x || '').trim(); })
+                    .filter(function(x, i, a) { return x && a.indexOf(x) === i; }).join(' / ');
+    const addr = [p.street, [p.suburb, p.postcode].map(function(x) { return String(x || '').trim(); }).filter(Boolean).join(' ')]
+                    .map(function(x) { return String(x || '').trim(); }).filter(Boolean).join(', ');
+    const c1 = splitContact(p.emergency), c2 = splitContact(p.alt1);
+    return [
+      ['p_name',     'Participant name',            String(p.name || '').trim()],
+      ['p_dob',      'Date of birth',               /^\d{4}-\d{2}-\d{2}$/.test(p.dob || '') ? p.dob : ''],
+      ['p_phone',    'Phone',                       phones],
+      ['p_email',    'Email',                       String(p.email || '').trim()],
+      ['p_address',  'Address',                     addr],
+      ['nok1_name',  '1st NOK — name',              c1.name],
+      ['nok1_phone', '1st NOK — contact no.',       c1.phone],
+      ['nok1_rel',   '1st NOK — relationship',      c1.rel],
+      ['nok2_name',  '2nd NOK — name',              c2.name],
+      ['nok2_phone', '2nd NOK — contact no.',       c2.phone],
+      ['nok2_rel',   '2nd NOK — relationship',      c2.rel]
+    ].filter(function(r) { return r[2]; }).map(function(r) { return { key: r[0], label: r[1], value: r[2] }; });
+  }
+  function shown(row) { return row.key === 'p_dob' ? dmy(row.value) : row.value; }
+
+  function linkOf(info) {
+    return { fileName: info.fileName, fileId: info.fileId, client: (info.participant && info.participant.name) || clientFromFile(info.fileName), linkedAt: new Date().toISOString() };
+  }
+  function folderLink(info) {
+    const f = info.clientFolder;
+    return f ? { folderId: f.id, folderName: f.name, folderPath: f.path || '', folderUrl: f.url || '' } : null;
+  }
+
+  // Care plans already started for the same person.
+  //   sure  — linked to this agreement, or to the same SharePoint client folder
+  //   maybe — same name (and the same date of birth where both have one)
+  function findCarePlans(info) {
+    const sure = [], maybe = [];
+    const map = (typeof readClients === 'function' ? readClients() : {}) || {};
+    const nm = norm(info.participant && info.participant.name);
+    const dob = (info.participant && info.participant.dob) || '';
+    Object.keys(map).forEach(function(id) {
+      const c = map[id];
+      const d = (c && c.state && c.state.data) || {};
+      const a = d._agreement, f = d._spFiles;
+      if ((a && a.fileName && a.fileName.toLowerCase() === String(info.fileName).toLowerCase()) ||
+          (info.clientFolder && f && f.folderId === info.clientFolder.id)) { sure.push(c); return; }
+      if (nm && norm(d.p_name) === nm && (!dob || !d.p_dob || d.p_dob === dob)) maybe.push(c);
+    });
+    const byDate = function(a, b) { return (b.lastSaved || 0) - (a.lastSaved || 0); };
+    return { sure: sure.sort(byDate), maybe: maybe.sort(byDate) };
+  }
+
+  /* ---------- acting on the care plan ---------- */
+  function refreshForms() {
+    ['initialContent', 'annualContent'].forEach(function(id) { const el = $(id); if (el && el.innerHTML) applyState(el); });
+    if (typeof updateClientChip === 'function') updateClientChip();
+    if (typeof updateInterimButton === 'function') updateInterimButton();
+  }
+
+  function createFrom(info, mode) {
+    const data = {};
+    mapRows(info.participant).forEach(function(r) { data[r.key] = r.value; });
+    data._agreement = linkOf(info);
+    const fl = folderLink(info);
+    if (fl) data._spFiles = fl;
+    state = { mode: mode, currentStep: mode === 'new' ? 'initial' : 'annual', data: data, selectedTools: {}, manualTools: {}, carePlan: {} };
+    activeClientId = genClientId();
+    hideMidPicker();
+    showAppShell();
+    initApp();
+    autoSave();
+    close();
+    toast('✓ Care plan started for <strong>' + h(data.p_name || 'this client') + '</strong> with the details from the Service Agreement' +
+          (fl ? ' — SharePoint folder already linked.' : '.'));
+  }
+
+  function openExisting(c, info) {
+    if (!loadClient(c.id)) { status('err', 'Could not open that care plan.'); return; }
+    hideMidPicker();
+    showAppShell();
+    initApp();
+    let changed = false;
+    if (!state.data._agreement || state.data._agreement.fileName !== info.fileName) { state.data._agreement = linkOf(info); changed = true; }
+    const fl = folderLink(info);
+    if (fl && !(state.data._spFiles && state.data._spFiles.folderId)) { state.data._spFiles = fl; changed = true; }
+    if (changed) autoSave();
+    close();
+    toast('Opened the care plan for <strong>' + h(state.data.p_name || c.name || 'this client') + '</strong> — linked to their Service Agreement.');
+  }
+
+  /* ---------- screens ---------- */
+  function agreementCard(info) {
+    const a = info.agreement || {};
+    const bits = [];
+    if (a.variant || a.version) bits.push(h([a.variant, a.version].filter(Boolean).join(' · ')));
+    if (a.startDate) bits.push('Start day ' + h(dmy(a.startDate)));
+    bits.push(info.signed ? '✍️ signed' : '⚠ not signed yet');
+    return '<div class="ag-card"><strong class="t">📄 ' + h((info.participant && info.participant.name) || clientFromFile(info.fileName)) + '</strong>' +
+      '<div>' + bits.join(' · ') + '</div>' +
+      '<small>Saved ' + h(when(info.savedAt)) + (info.savedBy ? ' by ' + h(String(info.savedBy).split('@')[0]) : '') + ' · ' + h(info.fileName) + '</small></div>';
+  }
+  function sourceNote(info) {
+    if (info.source === 'legacy') return '<div class="ag-warn">This agreement was saved before the two apps were linked, so its details were read from the older format. Please check them below before using them.</div>';
+    if (info.source === 'name-only') return '<div class="ag-warn">This agreement was saved before the two apps were linked and only the name could be read. To bring the other details across, open the agreement, press <strong>Save to Cloud</strong>, then try again.</div>';
+    return '';
+  }
+  function fieldsTable(rows, withTicks) {
+    if (!rows.length) return '<p class="ag-note">No details to bring across.</p>';
+    return '<table class="ag-fields">' + rows.map(function(r, i) {
+      const cur = withTicks ? String(state.data[r.key] == null ? '' : state.data[r.key]).trim() : '';
+      const same = cur === r.value;
+      const tick = withTicks
+        ? '<td class="c"><input type="checkbox" data-agrow="' + i + '"' + ((!cur || same) ? ' checked' : '') + (same ? ' disabled' : '') + '/></td>' : '';
+      const note = withTicks && cur && !same ? '<small>Care plan currently has: ' + h(r.key === 'p_dob' ? dmy(cur) : cur) + '</small>'
+                 : (withTicks && same ? '<small style="color:var(--ink-muted)">already the same</small>' : '');
+      return '<tr>' + tick + '<td class="l">' + h(r.label) + '</td><td>' + h(shown(r)) + note + '</td></tr>';
+    }).join('') + '</table>';
+  }
+
+  // Chosen an agreement while on the home screen (or arrived from the agreement app).
+  function showStart(info, found) {
+    const rows = mapRows(info.participant);
+    $('agIntro').textContent = 'Start a care plan from this signed agreement — the details below are filled in for you.';
+    let html = agreementCard(info) + sourceNote(info);
+    const existing = found.sure.concat(found.maybe);
+    if (existing.length) {
+      html += '<p class="ag-note" style="margin-bottom:0"><strong>' + (found.sure.length ? 'Care plan already started for this client:' : 'Care plans with the same name:') + '</strong></p><div class="ag-list">' +
+        existing.map(function(c, i) {
+          const d = (c.state && c.state.data) || {};
+          return '<button class="ag-item" data-agopen="' + i + '"><span class="nm">👤 ' + h(d.p_name || c.name || '(unnamed)') +
+            '<small>' + (c.mode === 'annual' ? 'Annual Review' : 'New Client') + ' · saved ' + h(when(c.lastSaved)) + (c.lastModifiedBy ? ' · ' + h(String(c.lastModifiedBy).split('@')[0]) : '') + '</small></span><span>Open →</span></button>';
+        }).join('') + '</div>';
+    }
+    html += '<p class="ag-note" style="margin:12px 0 0"><strong>' + (existing.length ? 'Or start another one with these details:' : 'Details that will be filled in:') + '</strong></p>' + fieldsTable(rows, false);
+    if (info.clientFolder) html += '<p class="ag-note">📁 SharePoint folder: <strong>' + h(info.clientFolder.name) + '</strong> — will be linked, so PDFs go to the same client folder.</p>';
+    html += '<div class="ag-actions"><button class="btn" id="agNew">Start New Client care plan <span class="arrow">→</span></button>' +
+            '<button class="btn ghost" id="agAnnual">Start Annual Review</button>' +
+            '<button class="ag-link" id="agBack" style="margin-left:auto">← Choose another agreement</button></div>';
+    $('agBody').innerHTML = html;
+    status('', '');
+    $('agBody').querySelectorAll('[data-agopen]').forEach(function(b) {
+      b.onclick = function() { openExisting(existing[Number(b.dataset.agopen)], info); };
+    });
+    $('agNew').onclick = function() { createFrom(info, 'new'); };
+    $('agAnnual').onclick = function() { createFrom(info, 'annual'); };
+    $('agBack').onclick = function() { showPick(''); };
+  }
+
+  // List of agreement records to choose from. onPick(info) is called with the chosen one.
+  async function showPick(prefill, purpose) {
+    const mine = ++_seq;
+    const linking = purpose === 'link';
+    $('agIntro').textContent = linking ? 'Which Service Agreement belongs to this client?' : 'Choose the client’s signed Service Agreement.';
+    $('agBody').innerHTML = '<p class="ag-note">Loading the agreements…</p>';
+    status('', '');
+    let items;
+    try { items = await list(true); }
+    catch (err) {
+      if (mine !== _seq) return;
+      $('agBody').innerHTML = '<button class="btn ghost" id="agRetry">Try again</button>';
+      $('agRetry').onclick = function() { showPick(prefill, purpose); };
+      status('err', errText(err));
+      return;
+    }
+    if (mine !== _seq) return;
+    $('agBody').innerHTML = '<input type="text" class="ag-search" id="agSearch" placeholder="Search by client name…" autocomplete="off"/>' +
+      '<div class="ag-list" id="agList"></div><p class="ag-note">' + items.length + ' saved agreement' + (items.length === 1 ? '' : 's') + ' in SharePoint.</p>';
+    const paint = function() {
+      const q = $('agSearch').value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+      const hit = items.filter(function(it) { const n = it.client.toLowerCase(); return q.every(function(t) { return n.indexOf(t) >= 0; }); });
+      $('agList').innerHTML = hit.length
+        ? hit.slice(0, 80).map(function(it) {
+            return '<button class="ag-item" data-agid="' + h(it.id) + '"><span class="nm">📄 ' + h(it.client) +
+              '<small>Saved ' + h(when(it.modified)) + (it.by ? ' · ' + h(it.by) : '') + '</small></span><span>' + (linking ? 'Link →' : 'Use →') + '</span></button>';
+          }).join('')
+        : '<div style="padding:14px;text-align:center;color:var(--ink-muted);font-size:13px">No agreement found' + (q.length ? ' for “' + h($('agSearch').value.trim()) + '”' : '') + '.<br>It is saved from the Service Agreement app with <strong>Save to Cloud</strong>.</div>';
+      $('agList').querySelectorAll('[data-agid]').forEach(function(b) {
+        b.onclick = function() { useAgreement({ id: b.dataset.agid }, purpose); };
+      });
+    };
+    $('agSearch').value = prefill || '';
+    $('agSearch').addEventListener('input', paint);
+    paint();
+    // A name that matches nothing should not look like an empty library
+    if (prefill && !$('agList').querySelector('[data-agid]')) { $('agSearch').value = ''; paint(); }
+  }
+
+  async function useAgreement(ref, purpose) {
+    const mine = ++_seq;
+    $('agBody').innerHTML = '<p class="ag-note">Reading the agreement…</p>';
+    status('', '');
+    let info;
+    try {
+      const got = await read(ref);
+      info = extract(got.record, got.meta);
+    } catch (err) {
+      if (mine !== _seq) return;
+      $('agBody').innerHTML = '<button class="btn ghost" id="agRetry">Choose another agreement</button>';
+      $('agRetry').onclick = function() { showPick('', purpose); };
+      status('err', isNotFound(err) ? 'That agreement record was not found — it may have been renamed or deleted.' : errText(err));
+      return null;
+    }
+    if (mine !== _seq) return null;
+    if (purpose === 'link') {
+      state.data._agreement = linkOf(info);
+      const fl = folderLink(info);
+      if (fl && !(state.data._spFiles && state.data._spFiles.folderId)) state.data._spFiles = fl;
+      autoSave();
+      showClient(info);
+      return info;
+    }
+    const found = findCarePlans(info);
+    if (purpose === 'arrive' && found.sure.length === 1) { openExisting(found.sure[0], info); return info; }
+    showStart(info, found);
+    return info;
+  }
+
+  // Panel for the client that is open: status of their agreement, open it, bring details across.
+  async function showClient(known) {
+    const mine = ++_seq;
+    const link = state.data._agreement;
+    if (!link || !link.fileName) { showPick((state.data.p_name || '').trim(), 'link'); return; }
+    $('agIntro').textContent = 'The Service Agreement linked to this client.';
+    status('', '');
+    let info = known || null;
+    if (!info) {
+      $('agBody').innerHTML = '<p class="ag-note">Checking the agreement…</p>';
+      try {
+        let got;
+        try { got = await read(link.fileId ? { id: link.fileId } : { name: link.fileName }); }
+        catch (e1) { if (isNotFound(e1) && link.fileId) got = await read({ name: link.fileName }); else throw e1; }
+        info = extract(got.record, got.meta);
+      } catch (err) {
+        if (mine !== _seq) return;
+        $('agBody').innerHTML = '<div class="ag-card"><strong class="t">📄 ' + h(link.client || link.fileName) + '</strong><small>' + h(link.fileName) + '</small></div>' +
+          '<div class="ag-actions"><button class="btn ghost" id="agRelink">Link a different agreement</button></div>';
+        $('agRelink').onclick = function() { showPick((state.data.p_name || '').trim(), 'link'); };
+        status('err', isNotFound(err) ? 'The linked agreement record no longer exists (renamed or deleted?). Link it again.' : errText(err));
+        return;
+      }
+      if (mine !== _seq) return;
+    }
+    const rows = mapRows(info.participant);
+    const differs = rows.filter(function(r) { return String(state.data[r.key] == null ? '' : state.data[r.key]).trim() !== r.value; });
+    const openUrl = AG.appUrl + '?open=' + encodeURIComponent(info.fileName);
+    $('agBody').innerHTML = agreementCard(info) + sourceNote(info) +
+      '<div class="ag-actions"><a class="btn" href="' + h(openUrl) + '" target="_blank" rel="noopener" style="text-decoration:none">Open the Service Agreement ↗</a>' +
+      '<button class="ag-link" id="agRelink" style="margin-left:auto">Link a different agreement</button></div>' +
+      '<p class="ag-note" style="margin:16px 0 0"><strong>' + (differs.length ? 'Details in the agreement — tick the ones to copy into this care plan:' : 'The participant details in this care plan already match the agreement.') + '</strong></p>' +
+      fieldsTable(rows, true) +
+      (differs.length ? '<div class="ag-actions"><button class="btn" id="agApply">Copy ticked details into the care plan</button></div>' : '');
+    $('agRelink').onclick = function() { showPick((state.data.p_name || '').trim(), 'link'); };
+    if ($('agApply')) $('agApply').onclick = function() {
+      const picked = [];
+      $('agBody').querySelectorAll('[data-agrow]').forEach(function(cb) { if (cb.checked && !cb.disabled) picked.push(rows[Number(cb.dataset.agrow)]); });
+      if (!picked.length) { status('err', 'Tick at least one detail to copy.'); return; }
+      picked.forEach(function(r) { state.data[r.key] = r.value; });
+      refreshForms();
+      autoSave();
+      close();
+      toast('✓ ' + picked.length + ' detail' + (picked.length === 1 ? '' : 's') + ' copied from the Service Agreement.');
+    };
+  }
+
+  function signedIn() { return typeof ODC_CLOUD !== 'undefined' && ODC_CLOUD.getUser && ODC_CLOUD.getUser(); }
+  function show() { $('agModal').style.display = 'flex'; }
+  function close() { _seq++; $('agModal').style.display = 'none'; }
+
+  function openPicker() {
+    if (!signedIn()) { alert('Sign in first.'); return; }
+    show();
+    showPick('');
+  }
+  function openForClient() {
+    if (!state.mode) { alert('Open a client first.'); return; }
+    if (!signedIn()) { alert('Sign in first.'); return; }
+    show();
+    showClient();
+  }
+
+  /* ---------- arriving from the agreement app: careplan/?sa=<record file> ---------- */
+  try {
+    const want = new URLSearchParams(location.search).get('sa');
+    if (want) sessionStorage.setItem(PENDING_KEY, want);   // survives the Microsoft sign-in redirect
+  } catch (e) {}
+
+  function consumePending() {
+    let name = null;
+    try { name = sessionStorage.getItem(PENDING_KEY); } catch (e) {}
+    if (!name || !signedIn()) return;
+    try { sessionStorage.removeItem(PENDING_KEY); } catch (e) {}
+    try {
+      const u = new URL(location.href);
+      if (u.searchParams.has('sa')) { u.searchParams.delete('sa'); history.replaceState(null, '', u.pathname + (u.search || '') + (u.hash || '')); }
+    } catch (e) {}
+    if (!/\.json$/i.test(name) || /[\\/]/.test(name)) return;
+    show();
+    $('agIntro').textContent = 'Opening the care plan for this Service Agreement…';
+    useAgreement({ name: name }, 'arrive');
+  }
+
+  function init() {
+    if (!$('agModal')) return;
+    $('agClose').addEventListener('click', close);
+    $('agModal').addEventListener('click', function(e) { if (e.target === $('agModal')) close(); });
+    if ($('btnFromAgreement')) $('btnFromAgreement').addEventListener('click', openPicker);
+    if ($('btnAgreement')) $('btnAgreement').addEventListener('click', openForClient);
+    // The home screen is (re)built once SharePoint has loaded — that is the moment to act on a link.
+    const orig = window.__refreshAppFromCloud;
+    if (typeof orig === 'function') {
+      window.__refreshAppFromCloud = function() {
+        const out = orig.apply(this, arguments);
+        try { consumePending(); } catch (e) { console.warn('Agreement link failed:', e); }
+        return out;
+      };
+    }
+  }
+  if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
+
+  return { openPicker: openPicker, openForClient: openForClient, list: list, read: read, extract: extract, mapRows: mapRows, splitContact: splitContact, findCarePlans: findCarePlans };
 })();
 </script>
 </body>
