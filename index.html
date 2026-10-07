@@ -1,6 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+<script>
+/* ODC: drop a half-finished Microsoft sign-in left in this tab by ANOTHER ODC app */
+(function(){ try {
+  var k = 'msal.interaction.status', v = sessionStorage.getItem(k);
+  if (v && v !== 'c47d2e17-f266-4271-80e6-46170c254ef4') sessionStorage.removeItem(k);
+} catch(e){} })();
+</script>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>One Dream Community — Care Plan Workflow (Cloud)</title>
