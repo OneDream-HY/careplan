@@ -18,8 +18,14 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v2.2 (3 Oct 2026)
+     APP VERSION: v2.3 (9 Oct 2026)
      Version history:
+       v2.3 — Onboarding link: 'Import from Onboarding form' button on the Initial
+              Assessment pulls the coordinator's saved onboarding record
+              (ODC-Onboarding_*.json on SharePoint) into the Initial Ax, and the
+              Interim Care Plan now auto-builds and LIVE-updates from the Initial
+              Ax for new clients (a field stops auto-updating once staff edit it).
+              Also adds 'Preferred communication method' to the Initial Ax.
        v2.2 — Save PDFs straight into the client's SharePoint folder (Aged Care
               Team site > "ODC Home Care  Clients" library): each client is
               linked to their folder once, the care-plan sub-folder is found
@@ -1112,7 +1118,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v2.2</span>
+    <span class="badge">Cloud · v2.3</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1126,7 +1132,7 @@ window.ODC_CLOUD = (function() {
     <div class="brand">
       <img id="topLogo" alt="One Dream Community" class="brand-logo"/>
       <span>One Dream Community</span>
-      <small id="modeLabel">CARE PLAN WORKFLOW · v2.2</small>
+      <small id="modeLabel">CARE PLAN WORKFLOW · v2.3</small>
     </div>
     <span class="mode-chip" id="modeChip" style="display:none">New Client</span>
     <span class="client-chip" id="clientChip" style="display:none">—</span>
@@ -1572,6 +1578,7 @@ window.ODC_CLOUD = (function() {
       <div>
         <h1>Initial <em>Assessment</em> & Planning.</h1>
         <p>Comprehensive RN/Care Manager assessment across 19 domains. Identification, contacts, medical and care domains in one place — no duplicate entry. At the end, tick the formal scoring tools and individual assessments needed: selected items appear in <strong>Step 2</strong>.</p>
+        <button type="button" class="btn ghost no-print" id="btnImportOnboarding" style="margin-top:10px">⬇ Import from Onboarding form</button>
       </div>
       <div class="step-meta"><span class="big">01</span>Step One<span class="doc-ref">Doc Ref: Initial Ax v0.2 MAY 2024</span></div>
     </div>
@@ -1776,6 +1783,8 @@ function buildInitialAssessment() {
       ${ta('p_culture','Cultural background / preferences')}
       ${txt('p_language','Preferred language')}
       ${sel('p_interpreter','Interpreter required',['Yes','No'])}
+      ${sel('p_comm_method','Preferred communication method',['Phone call','SMS / text','Email','In person','Via family / representative','Via interpreter','Letter / mail'])}
+      ${txt('p_comm_method_other','Communication method — detail')}
       ${sel('p_financial','Financial status',['Full pension','Partial pension','Private','Others','Do not want to share'])}
       ${txt('p_financial_other','Others — specify')}
     </div>
@@ -3296,6 +3305,7 @@ function onInput(el) {
   if (state.carriedOver) markFieldChanged(key);
   // Only recompute auto-tools when a trigger key changes (prevents focus theft while typing in normal fields).
   if (Object.prototype.hasOwnProperty.call(AUTO_TRIGGERS, key)) recomputeAutoTools();
+  autoBuildInterim(key);
   autoSave();
 }
 function onCheckGroup(el) {
@@ -3335,6 +3345,7 @@ function onCheckGroup(el) {
   });
   // Mirror linked check-groups (dentures/own teeth shared across forms, etc.)
   if (LINKED_CHECK_GROUPS.indexOf(k) !== -1) mirrorLinkedCheckGroup(k, arr);
+  autoBuildInterim(k);
   // Annual carry-over: re-evaluate change highlight for this group
   if (state.carriedOver) markFieldChanged(k);
   autoSave();
@@ -3344,6 +3355,7 @@ function onRadioGroup(el) {
   el.closest('[data-rgroup]').querySelectorAll('.chk').forEach(c => c.classList.remove('checked'));
   el.closest('.chk').classList.add('checked');
   if (state.carriedOver) markFieldChanged(el.dataset.rgkey);
+  autoBuildInterim(el.dataset.rgkey);
   autoSave();
 }
 function autoBMI() {
@@ -4439,29 +4451,139 @@ function _firstFilled() {
 }
 
 function prefillInterimFromInitial() {
-  // Map Initial Assessment fields -> Interim Care Plan fields. Only fills empty icp_* fields.
+  // Auto-builds the Interim Care Plan from the Initial Assessment so nothing is
+  // typed twice. LIVE rule: each icp_ field keeps auto-updating from the Initial
+  // Ax until a staff member edits it by hand (tracked via __icp_auto) — after
+  // that, their wording is left alone. To intentionally leave a field blank,
+  // type "N/A" or a dash.
   const D = state.data;
-  function setIfEmpty(key, val) {
-    if (val && (!D[key] || !String(D[key]).trim())) D[key] = val;
+  const auto = D.__icp_auto = D.__icp_auto || {};
+  function V(k) {
+    const v = D[k];
+    if (v == null) return '';
+    if (Array.isArray(v)) return v.join(', ');
+    return String(v).trim();
   }
-  setIfEmpty('icp_clientName', D.p_name);
-  setIfEmpty('icp_dob',        D.p_dob);
-  setIfEmpty('icp_diagnosis',  _firstFilled('med_diagnosis','med_diagnosed','med_chronic'));
-  // Allergies — split into med vs other if possible; otherwise dump into med
-  const allergiesAll = _firstFilled('med_allergies_summary','med_allergies');
-  setIfEmpty('icp_allergies_med',  allergiesAll);
-  setIfEmpty('icp_preference', _firstFilled('p_culture','hyg_pref'));
-  setIfEmpty('icp_comm',       _firstFilled('comm_difficulties','p_language'));
-  setIfEmpty('icp_speech',     D.comm_speech_detail);
-  setIfEmpty('icp_vision',     _firstFilled('comm_vision','comm_vision_other'));
-  setIfEmpty('icp_hearing',    _firstFilled('comm_hearing','comm_hearing_other'));
-  setIfEmpty('icp_complex',    _firstFilled('med_other','med_others_summary'));
-  setIfEmpty('icp_emerg',      _firstFilled('emerg_proc','emerg_assist_detail'));
+  function first() { for (let i = 0; i < arguments.length; i++) { const v = V(arguments[i]); if (v) return v; } return ''; }
+  function compose(parts) {
+    return parts.map(function(p) {
+      const v = first.apply(null, p.k);
+      return v ? (p.l ? p.l + ': ' + v : v) : '';
+    }).filter(Boolean).join('\n');
+  }
+  function setAuto(key, val) {
+    if (!val) return;
+    const cur = D[key] == null ? '' : String(D[key]);
+    if (!cur.trim() || cur === auto[key]) { D[key] = val; auto[key] = val; }
+  }
+  setAuto('icp_clientName', V('p_name'));
+  setAuto('icp_dob',        V('p_dob'));
+  setAuto('icp_diagnosis', compose([
+    {l:'', k:['med_diagnosis','med_diagnosed']},
+    {l:'Chronic', k:['med_chronic']},
+    {l:'Dementia', k:['med_dementia_detail']},
+    {l:'Terminal illness', k:['med_terminal']},
+    {l:'Disability', k:['med_disability']}
+  ]));
+  setAuto('icp_allergies_med', first('med_allergies_summary','med_allergies'));
+  setAuto('icp_preference', first('client_pref','p_culture','hyg_pref'));
+  setAuto('icp_comm', compose([
+    {l:'Language', k:['p_language','comm_speech_lang']},
+    {l:'Preferred method', k:['p_comm_method_other','p_comm_method']},
+    {l:'Interpreter', k:['p_interpreter','comm_speech_interp']},
+    {l:'Assistive devices', k:['comm_assistive_detail','comm_assistive']}
+  ]));
+  setAuto('icp_speech',  V('comm_speech_detail'));
+  setAuto('icp_vision',  first('comm_vision','comm_vision_other'));
+  setAuto('icp_hearing', first('comm_hearing','comm_hearing_other'));
+  setAuto('icp_comm_general', V('comm_notes'));
+  setAuto('icp_nutrition', compose([
+    {l:'Diet', k:['nu_diet']},
+    {l:'Fluids', k:['nu_fluid']},
+    {l:'Specific diet', k:['nu_specific_diet','nu_diet_other']},
+    {l:'Swallowing difficulty', k:['ia_swallowing']},
+    {l:'Meal prep — family', k:['nu_family_days']},
+    {l:'Meal prep — support worker', k:['nu_sw_days']},
+    {l:'Notes', k:['ia_nutrition_notes']}
+  ]));
+  setAuto('icp_hygiene', compose([
+    {l:'Assistance — family', k:['hyg_family_days']},
+    {l:'Assistance — support worker', k:['hyg_sw_days']},
+    {l:'Preference', k:['hyg_pref']},
+    {l:'Notes', k:['ia_hygiene_notes']}
+  ]));
+  setAuto('icp_mobility', compose([
+    {l:'Assistance', k:['ia_mobility_assist']},
+    {l:'Falls in last 12 months', k:['ia_falls12m','mob_falls_history']},
+    {l:'Falls risk', k:['mob_falls_risk']},
+    {l:'Fall details', k:['mob_fall_detail']},
+    {l:'Stairs', k:['ia_stairs']},
+    {l:'Notes', k:['ia_mobility_notes']}
+  ]));
+  setAuto('icp_continence', compose([
+    {l:'Incontinence', k:['ia_incontinent']},
+    {l:'Bladder', k:['ia_bladder']},
+    {l:'Bowels', k:['ia_bowel']},
+    {l:'Catheter / stoma', k:['ia_catheter']},
+    {l:'Support', k:['cont_support']},
+    {l:'Notes', k:['ia_continence_notes']}
+  ]));
+  setAuto('icp_mental', compose([
+    {l:'Diagnosed', k:['mh_diagnosed_detail','mh_diagnosed']},
+    {l:'Preference', k:['mh_pref']}
+  ]));
+  setAuto('icp_cognition', compose([
+    {l:'Dementia', k:['ia_dementia_cog','ia_dementia']},
+    {l:'Diagnosed', k:['cog_diagnosed_detail','cog_diagnosed']},
+    {l:'Notes', k:['cog_notes']}
+  ]));
+  setAuto('icp_behaviour', compose([
+    {l:'Behaviours / triggers', k:['ia_behaviour','mh_triggers_detail']},
+    {l:'Behaviour Support Plan', k:['mh_bsp']},
+    {l:'Psychotropic medication', k:['ia_psychotropic']},
+    {l:'Notes', k:['ia_behaviour_notes']}
+  ]));
+  setAuto('icp_complex', compose([
+    {l:'Skin', k:['skin_management','ia_skin_notes']},
+    {l:'Medications', k:['ia_med_notes','med_meds']},
+    {l:'Pain', k:['ia_pain_notes']},
+    {l:'Diabetes', k:['ia_diabetes','ia_diabetes_notes']},
+    {l:'Other', k:['med_other','med_others_summary']}
+  ]));
+  setAuto('icp_home', compose([
+    {l:'Repairs / maintenance required', k:['ia_home_repairs']},
+    {l:'Notes', k:['ia_home_notes']},
+    {l:'Pets / caution', k:['pets']}
+  ]));
+  setAuto('icp_social', compose([
+    {l:'Family', k:['ia_social_family']},
+    {l:'Friends', k:['ia_social_friends']},
+    {l:'Clubs / associations', k:['ia_social_clubs']},
+    {l:'Staying connected', k:['social_staying']},
+    {l:'Transport', k:['ia_transport_notes']},
+    {l:'Notes', k:['ia_social_notes']}
+  ]));
+  setAuto('icp_emerg', compose([
+    {l:'Procedure', k:['emerg_proc']},
+    {l:'Assistance required', k:['emerg_assist_detail','emerg_assist']},
+    {l:'Emergency plan', k:['emerg_plan']},
+    {l:'Personal alarm', k:['emerg_alarm']},
+    {l:'Next of kin', k:['nok1_name']},
+    {l:'NOK contact', k:['nok1_phone']}
+  ]));
+}
+
+// Rebuild the Interim CP whenever Initial Ax data changes (new clients only).
+function autoBuildInterim(changedKey) {
+  if (state.mode === 'new' && (!changedKey || String(changedKey).indexOf('icp_') !== 0)) {
+    try { prefillInterimFromInitial(); } catch (e) {}
+  }
 }
 
 function renderInterimForPrint() {
   const root = document.getElementById('interimPrintContent');
   if (!root) return false;
+  if (state.mode === 'new') { try { prefillInterimFromInitial(); } catch (e) {} }
   if (!interimHasData()) {
     root.innerHTML = '<p style="color:var(--ink-muted);font-style:italic">Interim Care Plan has not been filled in for this client.</p>';
     return false;
@@ -4648,7 +4770,7 @@ function _initInterimEditor() {
 
   btnOpen.addEventListener('click', function() {
     const wasEmpty = !interimHasData();
-    if (wasEmpty) prefillInterimFromInitial();
+    if (wasEmpty || state.mode === 'new') prefillInterimFromInitial();
     syncTextFieldsFromState();
     note.style.display = wasEmpty ? 'block' : 'none';
     modal.style.display = 'flex';
@@ -4853,6 +4975,150 @@ function executePrint() {
 document.getElementById('btnPrint').addEventListener('click', openPrintPicker);
 document.getElementById('btnPrint2').addEventListener('click', openPrintPicker);
 document.getElementById('btnPrintCancel').addEventListener('click', closePrintPicker);
+
+/* ---------- Import from Onboarding (All Onboarding Forms app) ----------
+   Pulls the coordinator's saved onboarding record (ODC-Onboarding_<Client>.json
+   in /sites/AgedCareTeam622/Shared Documents/Service Agreement Records/Onboarding)
+   into the Initial Assessment. Fill-only-empty: nothing already typed is touched. */
+(function initOnboardingImport() {
+  const OB = {
+    host: 'onedreamcommunity.sharepoint.com',
+    sitePath: '/sites/AgedCareTeam622',
+    folder: 'Service Agreement Records/Onboarding',
+    prefix: 'ODC-Onboarding_'
+  };
+  const btn = document.getElementById('btnImportOnboarding');
+  if (!btn) return;
+
+  let _obDriveId = null;
+  async function obDrive() {
+    if (!window.ODC_CLOUD || !ODC_CLOUD.graph) throw new Error('Cloud connection not ready — sign in first.');
+    if (!_obDriveId) {
+      const site = await ODC_CLOUD.graph('/sites/' + OB.host + ':' + OB.sitePath);
+      const drive = await ODC_CLOUD.graph('/sites/' + site.id + '/drive');
+      _obDriveId = drive.id;
+    }
+    return _obDriveId;
+  }
+  function encPath(p) { return p.split('/').map(encodeURIComponent).join('/'); }
+
+  async function listRecords() {
+    const driveId = await obDrive();
+    const res = await ODC_CLOUD.graph('/drives/' + driveId + '/root:/' + encPath(OB.folder) + ':/children?$top=500&$select=id,name,lastModifiedDateTime');
+    return (res.value || [])
+      .filter(function(it) { return it.name && it.name.indexOf(OB.prefix) === 0 && /\.json$/i.test(it.name); })
+      .sort(function(a, b) { return new Date(b.lastModifiedDateTime) - new Date(a.lastModifiedDateTime); });
+  }
+
+  function normDate(v) {
+    if (!v) return '';
+    const m = String(v).match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2);
+    return v;
+  }
+
+  function applyOnboarding(payload) {
+    const D = state.data;
+    const sh = (payload && payload.shared) || {};
+    const keyed = (payload && payload.keyed) || {};
+    function fromKeyed(re) {
+      for (const k in keyed) {
+        if (re.test(k)) { const v = keyed[k]; if (v && String(v).trim() && v !== 1 && v !== 0) return String(v).trim(); }
+      }
+      return '';
+    }
+    function pick(sharedKey, re) {
+      const v = sh[sharedKey];
+      if (v && String(v).trim()) return String(v).trim();
+      return re ? fromKeyed(re) : '';
+    }
+    let n = 0;
+    function set(key, val) {
+      if (!val) return;
+      if (D[key] && String(D[key]).trim()) return;   // never overwrite entered data
+      D[key] = val; n++;
+    }
+    set('p_name',      pick('p_name', /full_name|participant.*name|client.*name/));
+    set('p_preferred', pick('p_prefName', /preferred/));
+    set('p_dob',       normDate(pick('p_dob', /date_of_birth|\.dob\b/)));
+    set('p_email',     pick('p_email', /email/));
+    set('p_phone',     pick('p_mobile', /mobile|phone/));
+    set('p_address', [pick('p_street', /street/), pick('p_suburb', /suburb/), pick('p_postcode', /postcode/)].filter(Boolean).join(', '));
+    set('gp_name',     pick('p_gpName', /gp_name|\bgp\b|doctor/));
+    set('gp_phone',    pick('p_medCentrePhone', /(centre|center|gp).*(phone|contact)/));
+    set('nok1_name',   pick('p_nokName', /next_of_kin.*name|nok.*name/));
+    set('nok1_phone',  pick('p_nokPhone', /next_of_kin.*(phone|contact|mobile)|nok.*(phone|contact)/));
+    set('nok1_rel',    pick('p_nokRel', /next_of_kin.*rel|relationship_to/));
+    set('ia_height',   pick('p_height'));
+    set('ia_weight',   pick('p_weight'));
+    return n;
+  }
+
+  function showPicker(items) {
+    const nameOf = function(f) { return f.name.replace(OB.prefix, '').replace(/\.json$/i, '').replace(/-/g, ' '); };
+    let bg = document.getElementById('obPickBg');
+    if (bg) bg.remove();
+    bg = document.createElement('div');
+    bg.id = 'obPickBg';
+    bg.className = 'no-print';
+    bg.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(26,32,23,.45);z-index:9999;align-items:center;justify-content:center';
+    bg.innerHTML = '<div style="background:#fff;border-radius:8px;max-width:520px;width:92%;max-height:80vh;display:flex;flex-direction:column;padding:20px">' +
+      '<h2 class="serif" style="margin:0 0 4px">Import from <em>Onboarding</em></h2>' +
+      '<p style="margin:0 0 10px;font-size:12.5px;color:var(--ink-muted)">Pick the client\'s onboarding record. Only EMPTY fields are filled — nothing already typed is overwritten.</p>' +
+      '<input type="text" id="obPickSearch" placeholder="Search client name…" style="margin-bottom:8px"/>' +
+      '<div id="obPickList" style="flex:1;overflow-y:auto;border:1px solid var(--line);border-radius:6px;min-height:120px"></div>' +
+      '<div style="display:flex;justify-content:flex-end;margin-top:12px"><button type="button" class="btn ghost" id="obPickCancel">Cancel</button></div></div>';
+    document.body.appendChild(bg);
+    const list = bg.querySelector('#obPickList');
+    function paint(q) {
+      q = (q || '').toLowerCase();
+      list.innerHTML = items.filter(function(f) { return nameOf(f).toLowerCase().indexOf(q) >= 0; }).map(function(f) {
+        return '<button type="button" data-obid="' + f.id + '" style="display:block;width:100%;text-align:left;padding:10px 12px;border:0;border-bottom:1px solid var(--line);background:#fff;cursor:pointer">' +
+          '<strong>' + nameOf(f) + '</strong><br><small style="color:var(--ink-muted)">Saved ' + new Date(f.lastModifiedDateTime).toLocaleString() + '</small></button>';
+      }).join('') || '<div style="padding:14px;color:var(--ink-muted)">No matching records.</div>';
+    }
+    paint('');
+    bg.querySelector('#obPickSearch').addEventListener('input', function(e) { paint(e.target.value); });
+    bg.querySelector('#obPickCancel').addEventListener('click', function() { bg.remove(); });
+    bg.addEventListener('click', function(e) { if (e.target === bg) bg.remove(); });
+    list.addEventListener('click', async function(e) {
+      const b = e.target.closest('[data-obid]');
+      if (!b) return;
+      b.disabled = true; b.style.opacity = .6;
+      try {
+        const driveId = await obDrive();
+        const payload = await ODC_CLOUD.graph('/drives/' + driveId + '/items/' + b.dataset.obid + '/content');
+        const n = applyOnboarding(payload || {});
+        bg.remove();
+        applyState(document);
+        if (typeof autoBMI === 'function') { try { autoBMI(); } catch (err) {} }
+        autoBuildInterim();
+        autoSave();
+        alert(n ? ('Imported ' + n + ' field(s) from the onboarding record.\nOnly empty fields were filled — review and continue the assessment.')
+                : 'Nothing to import — the matching fields already have values.');
+      } catch (err) {
+        alert('Import failed: ' + (err.message || err));
+        b.disabled = false; b.style.opacity = 1;
+      }
+    });
+  }
+
+  btn.addEventListener('click', async function() {
+    btn.disabled = true;
+    const old = btn.textContent;
+    btn.textContent = 'Loading onboarding records…';
+    try {
+      const items = await listRecords();
+      if (!items.length) alert('No onboarding records found in:\n' + OB.folder);
+      else showPicker(items);
+    } catch (err) {
+      alert('Could not load onboarding records: ' + (err.message || err));
+    }
+    btn.disabled = false;
+    btn.textContent = old;
+  });
+})();
+
 document.getElementById('btnPrintGo').addEventListener('click', executePrint);
 
 /* Email coordinator — opens the user's email client with subject + body pre-filled.
