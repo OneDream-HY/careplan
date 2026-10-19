@@ -5256,28 +5256,19 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
       // Service + provider + frequency only (no dollar amounts, per staff preference)
       b.services.push('\u2022 ' + nm + ' \u2014 ' + sm[3] + ' ' + sm[4]);
     }
-    b.parsed = !!(b.subsidyQ || b.qAvail || b.availMo);
+    b.parsed = !!((b.services && b.services.length) || b.subsidyQ || b.qAvail || b.availMo);
     return b;
   }
 
   function buildSummary(b) {
-    const u = (window.ODC_CLOUD && ODC_CLOUD.getUser && ODC_CLOUD.getUser()) || {};
-    const rn = (state.data.an_rn_name || state.data.rn_name || u.name || '').trim();
     const td = new Date();
     const today = ('0' + td.getDate()).slice(-2) + '/' + ('0' + (td.getMonth() + 1)).slice(-2) + '/' + td.getFullYear();
     const L = [];
-    L.push('— Package budget (CareTok Package Overview' + (b.date ? ', ' + b.date : '') + ') —');
-    if (b.subsidyQ) L.push('Subsidy: $' + b.subsidyQ + '/quarter · $' + b.subsidyM + '/month' + (b.level ? ' (HCP Level ' + b.level + ')' : ''));
-    if (b.cmQ) L.push('Care management ' + b.cmRate + '%: $' + b.cmQ + '/quarter');
-    if (b.availMo) L.push('Available funds: $' + b.availMo + '/month' + (b.availDay ? ' ($' + b.availDay + '/day)' : ''));
-    if (b.qAvail) L.push('Quarterly: available $' + b.qAvail + ' · budgeted spend $' + b.qSpend + ' · surplus $' + b.qSurplus);
-    if (b.mAvail) L.push('Monthly: available $' + b.mAvail + ' · budgeted spend $' + b.mSpend + ' · surplus $' + b.mSurplus);
+    L.push('— Budgeted services (CareTok Package Overview' + (b.date ? ', ' + b.date : '') + ') —');
     if (b.services && b.services.length) {
-      L.push('Budgeted services:');
       b.services.forEach(function(sv) { L.push(sv); });
     }
-    if (b.grand) L.push('Budgeted services total: $' + b.grand + '/year');
-    L.push('Budget updated ' + today + (rn ? ' — ' + rn : ''));
+    L.push('Budget updated ' + today);
     return L.join('\n');
   }
 
