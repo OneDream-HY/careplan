@@ -18,8 +18,18 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v2.4 (19 Oct 2026)
+     APP VERSION: v2.6 (19 Oct 2026)
      Version history:
+       v2.6 — Teams notification: after sign-in the app posts an "Annual reviews
+              due" digest card to a Teams channel via the Workflows webhook URL in
+              ODC_CLOUD_CONFIG.teamsWebhookUrl (max one send per ~20h across all
+              devices — dedup marker stored on the CarePlan site).
+       v2.5 — Annual-review automation: "Annual review due" banner on the client
+              list (cycle ≥ 11 months, one-click carry-over); last period's Care
+              Plan Updates auto-folded into each domain's Review field on annual
+              creation; "No change this year" stamp button on every domain card;
+              weight / BMI / MNA / FRAT auto-compared against the previous review
+              (deltas with ⚠ shown in the domain summaries).
        v2.4 — Annual Ax gains ATSI / cultural background / preferred language /
               interpreter (flows to Care Plan snapshot); Communication & Sensory
               domain added to the Care Plan (auto-filled from Initial/Annual Ax);
@@ -81,6 +91,10 @@
     clientsListName: 'Clients',
     updatesListName: 'CarePlanUpdates',
     scopes:      ['User.Read', 'Sites.ReadWrite.All'],
+    // Teams "annual review due" notifications — paste a Teams Workflows webhook
+    // URL here (Teams channel → ⋯ → Workflows → "Post to a channel when a webhook
+    // request is received" → copy the HTTP URL). Leave '' to disable.
+    teamsWebhookUrl: '',
     // Where finished PDFs are filed: the document library that holds one folder
     // per client. driveId is that library's Graph drive id (fastest); if it is
     // blank or stops working, the library is looked up from sitePath + libraryName.
@@ -348,6 +362,9 @@ window.ODC_CLOUD = (function() {
       manualTools:   entry.state.manualTools   || {},
       carePlan:      entry.state.carePlan      || {},
       printSelection: entry.state.printSelection,
+      prevStats:        entry.state.prevStats || null,
+      previousReviewId: entry.state.previousReviewId || null,
+      carriedOverFrom:  entry.state.carriedOverFrom || null,
       updates:       Array.isArray(entry.state.updates) ? entry.state.updates : []
     });
 
@@ -583,6 +600,7 @@ window.ODC_CLOUD = (function() {
         overlay.style.display = 'none';
         // Re-trigger app startup with cloud data now in place
         if (typeof window.__refreshAppFromCloud === 'function') window.__refreshAppFromCloud();
+        if (typeof window.__maybeNotifyReviewsDue === 'function') window.__maybeNotifyReviewsDue();
       }, 1200);
     } catch (err) {
       console.error('SP connection error:', err);
@@ -1125,7 +1143,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v2.4</span>
+    <span class="badge">Cloud · v2.6</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1139,7 +1157,7 @@ window.ODC_CLOUD = (function() {
     <div class="brand">
       <img id="topLogo" alt="One Dream Community" class="brand-logo"/>
       <span>One Dream Community</span>
-      <small id="modeLabel">CARE PLAN WORKFLOW · v2.4</small>
+      <small id="modeLabel">CARE PLAN WORKFLOW · v2.6</small>
     </div>
     <span class="mode-chip" id="modeChip" style="display:none">New Client</span>
     <span class="client-chip" id="clientChip" style="display:none">—</span>
@@ -3658,6 +3676,45 @@ function startAnnualReviewFrom(sourceId) {
     previousReviewId: sourceId
   };
   ANNUAL_RESET_KEYS.forEach(k => { newState.data[k] = ''; });
+
+  // ---- Previous-review stats (for automatic change comparison on the Care Plan) ----
+  const _sd = src.state.data || {};
+  newState.prevStats = {
+    date: src.lastSaved ? new Date(src.lastSaved).toISOString().slice(0, 10) : '',
+    weight: _sd.ia_weight || _sd.an_weight || _sd.nu_weight || '',
+    bmi: _sd.ia_bmi || _sd.an_bmi || '',
+    frat_total: _sd.frat_total || '',
+    frat_risk: _sd.frat_risk || '',
+    mna: _sd.mna_score || ''
+  };
+
+  // ---- Fold last period's Care Plan Updates into the matching domain Review fields ----
+  // so staff don't have to reconstruct a year of changes from memory.
+  const SEC2DOM = { 'Pain':'pain', 'Skin/Wound':'skin', 'Continence':'continence',
+    'Nutrition':'nutrition', 'Falls/Mobility':'mobility', 'Behaviour':'behaviour',
+    'Medications':'medication', 'Hygiene':'hygiene', 'Palliative':'palliative',
+    'Communication':'communication' };
+  const _srcUpdates = Array.isArray(src.state.updates) ? src.state.updates : [];
+  if (_srcUpdates.length) {
+    const _byDom = {};
+    _srcUpdates.slice().sort((a, b) => (a.at || 0) - (b.at || 0)).forEach(u => {
+      const dom = SEC2DOM[u.section];
+      if (!dom) return;   // 'Care Plan' / 'Other' section updates stay in Update History
+      const d = u.at ? new Date(u.at) : null;
+      const ds = d ? (String(d.getDate()).padStart(2, '0') + '/' + String(d.getMonth() + 1).padStart(2, '0') + '/' + d.getFullYear()) : '';
+      const line = [ds, u.title, u.whatChanged ? '— ' + u.whatChanged : '',
+        u.by ? '(' + u.by + (u.status && u.status !== 'Approved' ? ', ' + u.status : '') + ')' : '']
+        .filter(Boolean).join(' ');
+      (_byDom[dom] = _byDom[dom] || []).push(line);
+    });
+    Object.keys(_byDom).forEach(dom => {
+      const key = 'cp_' + dom + '_review';
+      const block = '— Updates during last review period —\n' + _byDom[dom].join('\n');
+      const cur = newState.data[key] ? String(newState.data[key]).trim() : '';
+      newState.data[key] = cur ? cur + '\n\n' + block : block;
+    });
+  }
+
   // Snapshot AFTER reset → baseline for change detection
   newState.carriedOver = _deepCopy(newState.data);
   newState.carriedOverFrom = {
@@ -3775,6 +3832,7 @@ function cpDomain(id, label, opts) {
     ${ta('cp_'+id+'_days','Support days, time frame',{rows:2})}
     ${ta('cp_'+id+'_providers','Associated providers — info, number and task details',{rows:2})}
     ${ta('cp_'+id+'_review','Review / evaluation',{rows:2})}
+    <button type="button" class="mini-btn no-print" data-nochange="${id}" style="margin-top:4px">✓ No change this year</button>
   </div>`;
 }
 
@@ -3825,6 +3883,10 @@ function buildCarePlan() {
   }
 
   // Auto-populated summary text per domain — pulled from assessments (Initial / Annual / individual Ax forms)
+  // Previous-review stats captured when this annual review was created
+  const _ps = state.prevStats || {};
+  function _chg(prev, cur) { return prev != null && prev !== '' && cur != null && cur !== '' && String(prev) !== String(cur); }
+
   const autoFor = {
     communication: [
       D.ia_visionIssue && 'vision concerns',
@@ -3843,6 +3905,9 @@ function buildCarePlan() {
       D.comm_assistive_detail && `assistive devices: ${D.comm_assistive_detail}`,
     ].filter(Boolean).join(' · '),
     nutrition: [
+      _chg(_ps.weight, D.ia_weight) && `weight ${_ps.weight}→${D.ia_weight} kg since last review${(Math.abs(parseFloat(D.ia_weight) - parseFloat(_ps.weight)) >= 0.05 * parseFloat(_ps.weight)) ? ' ⚠' : ''}`,
+      _chg(_ps.bmi, D.ia_bmi) && `BMI ${_ps.bmi}→${D.ia_bmi}`,
+      _chg(_ps.mna, D.mna_score) && `MNA ${_ps.mna}→${D.mna_score}`,
       D.ia_weightLoss && 'recent unintended weight loss',
       D.ia_swallowing && 'swallowing difficulty',
       D.ia_pegFeeding && 'PEG/NG enteral feeding',
@@ -3861,7 +3926,7 @@ function buildCarePlan() {
       D.ia_mobilityAid && 'uses mobility aid',
       D.ia_balanceIssue && 'balance/transfer assistance',
       (D.mob_aids||[]).length && `aids: ${(D.mob_aids||[]).join(', ')}`,
-      D.frat_total && `FRAT total ${D.frat_total}${D.frat_risk ? ' — ' + D.frat_risk + ' risk' : ''}`,
+      D.frat_total && `FRAT total ${D.frat_total}${D.frat_risk ? ' — ' + D.frat_risk + ' risk' : ''}${_chg(_ps.frat_total, D.frat_total) ? ` (was ${_ps.frat_total}${_ps.frat_risk ? ' ' + _ps.frat_risk : ''})${(parseInt(D.frat_total, 10) || 0) > (parseInt(_ps.frat_total, 10) || 0) ? ' ⚠' : ''}` : ''}`,
     ].filter(Boolean).join(' · '),
     continence: [
       D.ia_incontinent && 'incontinence reported',
@@ -4114,6 +4179,21 @@ function renderCarePlan() {
   root.innerHTML = buildCarePlan();
   bindFields(root);
   applyState(root);
+  // "No change this year" — stamps a dated review line into the domain's Review field
+  root.querySelectorAll('[data-nochange]').forEach(b => b.addEventListener('click', e => {
+    const id = e.target.dataset.nochange;
+    const key = 'cp_' + id + '_review';
+    const u = (window.ODC_CLOUD && ODC_CLOUD.getUser && ODC_CLOUD.getUser()) || {};
+    const rn = (state.data.an_rn_name || state.data.rn_name || u.name || '').trim();
+    const t = new Date();
+    const stamp = 'Reviewed ' + String(t.getDate()).padStart(2, '0') + '/' + String(t.getMonth() + 1).padStart(2, '0') + '/' + t.getFullYear() + ' — no change.' + (rn ? ' ' + rn : '');
+    const cur = state.data[key] ? String(state.data[key]).trim() : '';
+    if (cur.indexOf(stamp) !== -1) return;
+    state.data[key] = cur ? cur + '\n' + stamp : stamp;
+    const el = root.querySelector('[data-key="' + key + '"]');
+    if (el) el.value = state.data[key];
+    autoSave();
+  }));
   // set logo on dynamic print-headers
   root.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
   // step number for care plan depends on mode
@@ -4334,6 +4414,64 @@ function importJSON(file) {
   r.readAsText(file);
 }
 
+/* ---------- Teams "annual review due" notification ----------
+   Runs after sign-in. Sends ONE digest card per ~20h across ALL staff devices:
+   a tiny marker file on the CarePlan site records the last send time. */
+window.__maybeNotifyReviewsDue = async function() {
+  try {
+    const cfg2 = window.ODC_CLOUD_CONFIG || {};
+    const hook = (cfg2.teamsWebhookUrl || '').trim();
+    if (!hook || !window.ODC_CLOUD || !ODC_CLOUD.graph || !ODC_CLOUD.siteId) return;
+    const due = computeDueClients(readClients());
+    if (!due.length) return;
+    const MARKER = '/sites/' + ODC_CLOUD.siteId + '/drive/root:/careplan-review-due-notify.json';
+    try {
+      const m = await ODC_CLOUD.graph(MARKER + ':/content');
+      if (m && m.sentAt && (Date.now() - new Date(m.sentAt).getTime()) < 20 * 3600 * 1000) return;
+    } catch (e) { /* marker doesn't exist yet — first send */ }
+    const lines = due.slice(0, 15).map(c => {
+      const d = (c.state && c.state.data) || {};
+      const months = Math.floor((Date.now() - (c.createdAt || c.lastSaved)) / (30.44 * 24 * 3600 * 1000));
+      return '- **' + (d.p_name || d.p_preferred || c.name || '(unnamed)') + '** — cycle started ' + months + ' months ago';
+    }).join('\n') + (due.length > 15 ? '\n…and ' + (due.length - 15) + ' more' : '');
+    const card = {
+      type: 'message',
+      attachments: [{
+        contentType: 'application/vnd.microsoft.card.adaptive',
+        content: {
+          '$schema': 'http://adaptivecards.io/schemas/adaptive-card.json',
+          type: 'AdaptiveCard',
+          version: '1.4',
+          body: [
+            { type: 'TextBlock', size: 'Large', weight: 'Bolder', text: '📅 Care Plan — Annual reviews due (' + due.length + ')' },
+            { type: 'TextBlock', wrap: true, text: lines },
+            { type: 'TextBlock', wrap: true, isSubtle: true, text: 'Open the Care Plan Workflow → Clients — each name has a one-click "Start annual review" button.' }
+          ]
+        }
+      }]
+    };
+    await fetch(hook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(card) });
+    await ODC_CLOUD.graph(MARKER + ':/content', { method: 'PUT', body: { sentAt: new Date().toISOString(), count: due.length } });
+    console.log('Review-due Teams notification sent (' + due.length + ' clients).');
+  } catch (err) { console.warn('Review-due Teams notification skipped:', err); }
+};
+
+// Clients whose care-plan cycle started ≥ 11 months ago with no newer annual
+// review created from them (linked by previousReviewId or by same name).
+function computeDueClients(map) {
+  const ELEVEN_MONTHS = 11 * 30.44 * 24 * 3600 * 1000;
+  const all = Object.values(map || {});
+  return all.filter(c => {
+    const started = c.createdAt || c.lastSaved || 0;
+    if (!started || (Date.now() - started) < ELEVEN_MONTHS) return false;
+    const nm = ((c.state && c.state.data && c.state.data.p_name) || '').trim().toLowerCase();
+    return !all.some(o => o !== c && (
+      (o.state && o.state.previousReviewId === c.id) || o.previousReviewId === c.id ||
+      (o.mode === 'annual' && nm && ((o.state && o.state.data && (o.state.data.p_name || '')).trim().toLowerCase() === nm) && (o.createdAt || 0) > started)
+    ));
+  }).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+}
+
 function renderSavedClients() {
   const root = document.getElementById('savedClientsList');
   if (!root) return;
@@ -4348,6 +4486,25 @@ function renderSavedClients() {
   const searchEl = document.getElementById('clientSearch');
   const q = searchEl ? searchEl.value.trim().toLowerCase() : '';
   const totalCount = list.length;
+
+  // ---- Annual-review-due detection: cycle started ≥ 11 months ago and no newer
+  // annual review record has been created from it (by link or by same name) ----
+  function _escDue(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+  const dueClients = computeDueClients(map);
+  let dueHtml = '';
+  if (!q && dueClients.length) {
+    dueHtml = '<div style="background:#fff8e1;border:1px solid #d4a017;border-radius:8px;padding:12px 14px;margin-bottom:14px">' +
+      '<h3 style="margin:0 0 4px;color:#6b4e00">📅 Annual review due (' + dueClients.length + ')</h3>' +
+      '<small style="color:#8a6d1a">Care plan cycle started 11+ months ago — one click carries the data over into a new Annual Review.</small>' +
+      dueClients.map(c => {
+        const d2 = (c.state && c.state.data) || {};
+        const months = Math.floor((Date.now() - (c.createdAt || c.lastSaved)) / (30.44 * 24 * 3600 * 1000));
+        return '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid #f0e2b6;margin-top:6px">' +
+          '<div style="flex:1"><strong>' + _escDue(d2.p_name || d2.p_preferred || c.name || '(unnamed)') + '</strong> ' +
+          '<small style="color:#8a6d1a">· cycle started ' + months + ' months ago</small></div>' +
+          '<button type="button" data-annual="' + c.id + '" style="background:#fff;border:1px solid #d4a017;color:#6b4e00">Start annual review →</button></div>';
+      }).join('') + '</div>';
+  }
   if (q) {
     list = list.filter(c => {
       const d = (c.state && c.state.data) || {};
@@ -4381,7 +4538,7 @@ function renderSavedClients() {
   const heading = q
     ? '<h3>Resume a client (' + list.length + ' of ' + totalCount + ')</h3>'
     : '<h3>Resume a client (' + list.length + ')</h3>';
-  root.innerHTML = heading + list.map(c => {
+  root.innerHTML = dueHtml + heading + list.map(c => {
     // Prefer the actual participant name (state.data.p_name) over the default
     // "New Client · started ..." label. Fall back to preferred name, then cached label.
     const d = (c.state && c.state.data) || {};
