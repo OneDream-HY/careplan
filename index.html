@@ -18,8 +18,15 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v2.3 (9 Oct 2026)
+     APP VERSION: v2.4 (19 Oct 2026)
      Version history:
+       v2.4 — Annual Ax gains ATSI / cultural background / preferred language /
+              interpreter (flows to Care Plan snapshot); Communication & Sensory
+              domain added to the Care Plan (auto-filled from Initial/Annual Ax);
+              'Vision concerns / legally blind' tick split into two separate ticks;
+              every Individual Ax now shows a Client / DOB / Allergies banner;
+              FRAT auto risk category (Low/Moderate/High) shown next to the score
+              and carried into the Care Plan mobility domain.
        v2.3 — Onboarding link: 'Import from Onboarding form' button on the Initial
               Assessment pulls the coordinator's saved onboarding record
               (ODC-Onboarding_*.json on SharePoint) into the Initial Ax, and the
@@ -1118,7 +1125,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v2.3</span>
+    <span class="badge">Cloud · v2.4</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1132,7 +1139,7 @@ window.ODC_CLOUD = (function() {
     <div class="brand">
       <img id="topLogo" alt="One Dream Community" class="brand-logo"/>
       <span>One Dream Community</span>
-      <small id="modeLabel">CARE PLAN WORKFLOW · v2.3</small>
+      <small id="modeLabel">CARE PLAN WORKFLOW · v2.4</small>
     </div>
     <span class="mode-chip" id="modeChip" style="display:none">New Client</span>
     <span class="client-chip" id="clientChip" style="display:none">—</span>
@@ -1691,7 +1698,7 @@ const APP_VERSION = "v0.4";
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v0.2", "date": "MAY 2024"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v0.2", "date": "SEP 2025"}, "careplan": {"title": "Care Plan", "ver": "v0.3", "date": "JAN 2026"}, "pain": {"title": "Pain Assessment", "ver": "v0.1", "date": "MAY 2024"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v0.1", "date": "MAY 2024"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v0.1", "date": "MAY 2024"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v0.1", "date": "MAY 2024"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v0.1", "date": "MAY 2024"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v0.1", "date": "MAY 2024"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v0.1", "date": "MAY 2024"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v0.1", "date": "MAY 2024"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v0.1", "date": "MAY 2024"}, "mobility": {"title": "Mobility Assessment", "ver": "v0.1", "date": "MAY 2024"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v0.1", "date": "MAY 2024"}, "medications": {"title": "Medications Management", "ver": "v0.1", "date": "MAY 2024"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v0.1", "date": "MAY 2024"}, "palliative": {"title": "Palliative Care Management", "ver": "v0.1", "date": "MAY 2024"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v0.1", "date": "MAY 2024"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v0.1", "date": "MAY 2024"}};
 
-const AUTO_TRIGGERS = {"ia_pain_yes": ["pain"], "ia_chronicPain": ["pain"], "ia_skinIssue": ["skin"], "ia_pressureInjuryRisk": ["skin"], "ia_woundActive": ["wound", "skin"], "ia_skinTear": ["skin", "wound"], "ia_incontinent": ["continence"], "ia_catheter": ["catheter", "continence"], "ia_weightLoss": ["mna", "nutrition"], "ia_swallowing": ["nutrition", "communication"], "ia_pegFeeding": ["nutrition"], "ia_appetiteIssue": ["mna"], "ia_diabetes": ["diabetes"], "ia_falls12m": ["frat", "mobility"], "ia_mobilityAid": ["mobility"], "ia_balanceIssue": ["frat", "mobility"], "ia_behaviour": ["behaviour"], "ia_dementia": ["behaviour", "communication"], "ia_psychotropic": ["behaviour", "medications"], "ia_polypharmacy": ["medications"], "ia_anticoagulant": ["medications"], "ia_insulin": ["medications", "diabetes"], "ia_hygieneAssist": ["hygiene"], "ia_palliative": ["palliative"], "ia_complexNeed": ["comprehensive"], "ia_visionIssue": ["communication"], "ia_hearingIssue": ["communication"], "ia_speechIssue": ["communication"], "ia_cognitiveImpair": ["communication", "behaviour"]};
+const AUTO_TRIGGERS = {"ia_pain_yes": ["pain"], "ia_chronicPain": ["pain"], "ia_skinIssue": ["skin"], "ia_pressureInjuryRisk": ["skin"], "ia_woundActive": ["wound", "skin"], "ia_skinTear": ["skin", "wound"], "ia_incontinent": ["continence"], "ia_catheter": ["catheter", "continence"], "ia_weightLoss": ["mna", "nutrition"], "ia_swallowing": ["nutrition", "communication"], "ia_pegFeeding": ["nutrition"], "ia_appetiteIssue": ["mna"], "ia_diabetes": ["diabetes"], "ia_falls12m": ["frat", "mobility"], "ia_mobilityAid": ["mobility"], "ia_balanceIssue": ["frat", "mobility"], "ia_behaviour": ["behaviour"], "ia_dementia": ["behaviour", "communication"], "ia_psychotropic": ["behaviour", "medications"], "ia_polypharmacy": ["medications"], "ia_anticoagulant": ["medications"], "ia_insulin": ["medications", "diabetes"], "ia_hygieneAssist": ["hygiene"], "ia_palliative": ["palliative"], "ia_complexNeed": ["comprehensive"], "ia_visionIssue": ["communication"], "ia_legallyBlind": ["communication"], "ia_hearingIssue": ["communication"], "ia_speechIssue": ["communication"], "ia_cognitiveImpair": ["communication", "behaviour"]};
 
 /* state */
 let state = {
@@ -1876,7 +1883,8 @@ function buildInitialAssessment() {
     <h2>Communication</h2>
     <p class="subtitle">Use the statements below as a guide to describe the consumer's abilities.</p>
     <div class="check-grid three">
-      ${tickField('ia_visionIssue','Vision concerns / legally blind')}
+      ${tickField('ia_visionIssue','Vision concerns')}
+      ${tickField('ia_legallyBlind','Legally blind')}
       ${tickField('ia_hearingIssue','Hearing deficit')}
       ${tickField('ia_speechIssue','Speech / dysphasia / dysarthria')}
       ${tickField('ia_cognitiveImpair','Cognitive impairment')}
@@ -2359,6 +2367,10 @@ function buildAnnualAssessment() {
       ${sel('p_gender','Gender',['Female','Male','Non-binary','Prefer not to say'])}
       ${txt('p_address','Residential address')}
       ${txt('p_date','Date',{type:'date'})}
+      ${sel('p_atsi','Aboriginal / Torres Strait Islander origin',['No, Neither','Yes, Aboriginal','Yes, Torres Strait Islander','Yes, Both Aboriginal and Torres Strait Islander'])}
+      ${ta('p_culture','Cultural background / preferences')}
+      ${txt('p_language','Preferred language')}
+      ${sel('p_interpreter','Interpreter required',['Yes','No'])}
     </div>
     <div style="margin-top:10px"><label class="field"><span>Support at Home — Level / Funding</span>${checks('p_funding',['SAH 1','SAH 2','SAH 3','SAH 4','SAH 5','SAH 6','SAH 7','SAH 8','Transitioned Level 1','Transitioned Level 2','Transitioned Level 3','Transitioned Level 4','NDIS','Attendant Care','Private'],{cols:3})}</label></div>
     <div class="grid two" style="margin-top:10px">
@@ -2717,7 +2729,10 @@ const ASSESSMENTS = {
       ${sel('frat_foot','Footwear / foot problems',['0 None','1 Ill-fitting shoes','2 Wounds / painful feet','3 Neuropathy / contractures'])}
       ${sel('frat_drug','Drug & alcohol',['0 Nil','1 Mild','2 Moderate','3 Heavy regular'])}
       ${sel('frat_env','Environment',['0 Nil dangers','1 One risk','2 Two risks','3 Multiple risks'])}
-      <label class="field"><span>Total FRAT score <em style="font-weight:normal;color:var(--ink-soft)">— auto-calculated</em></span><input type="number" data-key="frat_total" data-frat-total="1" readonly style="background:#f4f6ee;font-weight:600"/></label>
+      <div class="grid two">
+        <label class="field"><span>Total FRAT score <em style="font-weight:normal;color:var(--ink-soft)">— auto-calculated</em></span><input type="number" data-key="frat_total" data-frat-total="1" readonly style="background:#f4f6ee;font-weight:600"/></label>
+        <label class="field"><span>Risk category <em style="font-weight:normal;color:var(--ink-soft)">— auto · 0–12 Low · 13–22 Moderate · 23–42 High</em></span><input type="text" data-key="frat_risk" readonly style="background:#f4f6ee;font-weight:600"/></label>
+      </div>
     </div>
     ${signoff('frat')}
   `,
@@ -3006,6 +3021,15 @@ function renderToolsList() {
   document.getElementById('addDocCount').textContent = Object.keys(state.selectedTools).length + ' assessment(s) selected';
 }
 
+function refreshAxClientStrips() {
+  // Client identity + allergy banner on every Individual Ax (mirrors Interim CP)
+  const D = state.data;
+  const t = 'Client: ' + (D.p_name || '—') +
+            ' · DOB: ' + (D.p_dob || '—') +
+            ' · Allergies: ' + (D.med_allergies_summary || D.med_allergies || '—');
+  document.querySelectorAll('.ax-client-strip').forEach(el => { el.textContent = t; });
+}
+
 function renderAxBlocks() {
   const wrap = document.getElementById('axWrap');
   const ids = TOOL_ORDER.filter(id => state.selectedTools[id]);
@@ -3023,11 +3047,13 @@ function renderAxBlocks() {
         <span class="ver-tag">${d.ver} · ${d.date}</span>
         <button class="ax-collapse-btn no-print" data-collapse="${id}">Collapse ▾</button>
       </div>
+      <div class="ax-client-strip" style="margin:0 0 8px;padding:6px 10px;background:var(--accent-light);border-left:3px solid var(--accent);border-radius:0 4px 4px 0;font-size:12.5px;color:var(--accent-deep)"></div>
       <div class="ax-body" data-body="${id}">${html}</div>
     </div>`;
   }).join('');
   // bind controls
   bindFields(wrap);
+  refreshAxClientStrips();
   document.querySelectorAll('[data-collapse]').forEach(b => {
     b.addEventListener('click', e => {
       const id = e.target.dataset.collapse;
@@ -3306,6 +3332,7 @@ function onInput(el) {
   // Only recompute auto-tools when a trigger key changes (prevents focus theft while typing in normal fields).
   if (Object.prototype.hasOwnProperty.call(AUTO_TRIGGERS, key)) recomputeAutoTools();
   autoBuildInterim(key);
+  if (key === 'p_name' || key === 'p_dob' || key === 'med_allergies' || key === 'med_allergies_summary') refreshAxClientStrips();
   autoSave();
 }
 function onCheckGroup(el) {
@@ -3401,6 +3428,10 @@ function autoFRAT() {
   });
   state.data.frat_total = any ? total : '';
   document.querySelectorAll('[data-key="frat_total"]').forEach(f => { f.value = any ? total : ''; });
+  // Risk category per FRAT banding: 0-12 Low, 13-22 Moderate, 23-42 High
+  const fratCat = !any ? '' : (total <= 12 ? 'Low' : (total <= 22 ? 'Moderate' : 'High'));
+  state.data.frat_risk = fratCat;
+  document.querySelectorAll('[data-key="frat_risk"]').forEach(f => { f.value = fratCat; });
 }
 
 /* ---------- Linked-field mirroring ---------- */
@@ -3761,6 +3792,7 @@ function buildCarePlan() {
     mobility:   ['mobility', 'frat'],
     continence: ['continence'],
     behaviour:  ['behaviour'],
+    communication: ['communication'],
     cognition:  ['communication'],
     skin:       ['skin', 'wound'],
     medication: ['medications'],
@@ -3794,6 +3826,22 @@ function buildCarePlan() {
 
   // Auto-populated summary text per domain — pulled from assessments (Initial / Annual / individual Ax forms)
   const autoFor = {
+    communication: [
+      D.ia_visionIssue && 'vision concerns',
+      D.ia_legallyBlind && 'legally blind',
+      D.ia_hearingIssue && 'hearing deficit',
+      D.ia_speechIssue && 'speech / dysphasia / dysarthria',
+      D.ia_cognitiveImpair && 'cognitive impairment',
+      (D.comm_vision||[]).length && `vision: ${(D.comm_vision||[]).join(', ')}`,
+      (D.comm_hearing||[]).length && `hearing: ${(D.comm_hearing||[]).join(', ')}`,
+      D.comm_speech_detail && `speech: ${D.comm_speech_detail}`,
+      D.an_vision && `vision (annual): ${D.an_vision}`,
+      D.an_hearing && `hearing (annual): ${D.an_hearing}`,
+      D.p_language && `preferred language: ${D.p_language}`,
+      D.p_comm_method && `preferred contact: ${D.p_comm_method}`,
+      D.p_interpreter === 'Yes' && 'interpreter required',
+      D.comm_assistive_detail && `assistive devices: ${D.comm_assistive_detail}`,
+    ].filter(Boolean).join(' · '),
     nutrition: [
       D.ia_weightLoss && 'recent unintended weight loss',
       D.ia_swallowing && 'swallowing difficulty',
@@ -3813,7 +3861,7 @@ function buildCarePlan() {
       D.ia_mobilityAid && 'uses mobility aid',
       D.ia_balanceIssue && 'balance/transfer assistance',
       (D.mob_aids||[]).length && `aids: ${(D.mob_aids||[]).join(', ')}`,
-      D.frat_total && `FRAT total ${D.frat_total}`,
+      D.frat_total && `FRAT total ${D.frat_total}${D.frat_risk ? ' — ' + D.frat_risk + ' risk' : ''}`,
     ].filter(Boolean).join(' · '),
     continence: [
       D.ia_incontinent && 'incontinence reported',
@@ -4020,6 +4068,7 @@ function buildCarePlan() {
     extra: `<div class="grid two">${sel('cp_behaviour_pbsp','Positive Behaviour Support Plan (PBSP) in place',['Yes','No'])}${ta('cp_behaviour_pbsp_note','If yes — attach original report; brief note',{rows:1})}</div>`
   })}
   ${cpDomain('cognition','Cognition',{autoNeeds: autoFor.cognition})}
+  ${shouldShowDomain('communication') ? cpDomain('communication','Communication & Sensory (Vision · Hearing · Speech)',{autoNeeds: autoFor.communication}) : ''}
   ${cpDomain('skin','Skin Integrity',{autoNeeds: autoFor.skin})}
   ${cpDomain('medication','Medication Management',{autoNeeds: autoFor.medication})}
   ${cpDomain('pain','Pain Management',{autoNeeds: autoFor.pain})}
