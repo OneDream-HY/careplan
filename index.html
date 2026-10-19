@@ -5244,6 +5244,18 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
     m = t.match(/EACH MONTHLY[\s\S]{0,100}?([\d,]+\.\d{2})\s+([\d,]+\.\d{2})\s+([\d,]+\.\d{2})/i);
     if (m) { b.mAvail = m[1]; b.mSpend = m[2]; b.mSurplus = m[3]; }
     b.grand = num(/Grand Total \$?\s*([\d,]+\.\d{2})/i, t);
+    // Care Budget service lines (name+provider, rate, units, frequency, annual cost).
+    // Tolerates both PDF text orders (rate column present or regrouped elsewhere).
+    b.services = [];
+    const sre = /([A-Za-z][A-Za-z0-9 '&.,\/\-]*?)\s+(?:([\d,]+(?:\.\d+)?)\s+)?(\d+(?:\.\d+)?)\s+(Weekly|Fortnightly|Monthly|Quarterly|Daily|Annually|Yearly)\s+(?:[\d,]+(?:\.\d{1,2})?\s+)?(?:[\d,]+\.\d{2}\s+)?([\d,]+\.\d{2})/gi;
+    let sm;
+    while ((sm = sre.exec(t)) !== null) {
+      let nm = sm[1].replace(/\s+/g, ' ').trim();
+      if (nm.length > 90) continue;
+      if (nm === nm.toUpperCase() && /FREQUENCY|DESCRIPTION|PROVIDER|RATE|PURCHASE/i.test(nm)) continue;
+      // Service + provider + frequency only (no dollar amounts, per staff preference)
+      b.services.push('\u2022 ' + nm + ' \u2014 ' + sm[3] + ' ' + sm[4]);
+    }
     b.parsed = !!(b.subsidyQ || b.qAvail || b.availMo);
     return b;
   }
@@ -5260,6 +5272,10 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
     if (b.availMo) L.push('Available funds: $' + b.availMo + '/month' + (b.availDay ? ' ($' + b.availDay + '/day)' : ''));
     if (b.qAvail) L.push('Quarterly: available $' + b.qAvail + ' · budgeted spend $' + b.qSpend + ' · surplus $' + b.qSurplus);
     if (b.mAvail) L.push('Monthly: available $' + b.mAvail + ' · budgeted spend $' + b.mSpend + ' · surplus $' + b.mSurplus);
+    if (b.services && b.services.length) {
+      L.push('Budgeted services:');
+      b.services.forEach(function(sv) { L.push(sv); });
+    }
     if (b.grand) L.push('Budgeted services total: $' + b.grand + '/year');
     L.push('Budget updated ' + today + (rn ? ' — ' + rn : ''));
     return L.join('\n');
