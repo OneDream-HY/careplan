@@ -18,8 +18,22 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v2.7 (19 Oct 2026)
+     APP VERSION: v2.8 (20 Oct 2026)
      Version history:
+       v2.8 — MAC Support Plan import + care-plan draft generator: "📄 Import MAC
+              Support Plan" reads a My Aged Care Support Plan (REP001 — HCP or
+              Support at Home layout) or an Assessment outcome letter (LTR003)
+              from SharePoint / PDF / pasted text, fills empty Initial Ax fields
+              (MAC ID, DOB, diagnoses, GP, language, funding level, risk ticks)
+              and stores goals, recommendations and approvals on the record.
+              "✨ Generate care plan draft" merges the Support Plan + assessment
+              ticks/scores + the imported package budget into every domain
+              (goals, needs, intervention, tasks, providers, aids) — fills only
+              empty fields, tags each as DRAFT until an RN edits it, flags
+              recommended-but-unbudgeted (and budgeted-but-unrecommended)
+              services, and prints a "My Aged Care Support Plan" summary page.
+              Short-term AT / HM approvals that expire within 90 days are
+              listed on the client list.
        v2.7 — Quarterly budget import: "🧾 Import package budget" button on the
               Care Plan reads a CareTok Package Overview PDF (or pasted page
               text) and appends the subsidy / available funds / budgeted spend
@@ -986,6 +1000,7 @@ window.ODC_CLOUD = (function() {
     .card.print-page[data-cpdomain] > .print-header .ph-ver { font-size: 10px; padding: 2px 6px; }
     /* exception: Risk Alert always starts on its own page (visual emphasis) */
     .card.print-page[data-cpdomain="risk"] { page-break-before: always !important; }
+    [data-cpdomain="mac"] td, [data-cpdomain="mac"] th { padding: 4px 6px; border-bottom: 1px solid var(--line); vertical-align: top; }
     /* tighten card spacing so multiple sections pack on a page */
     body.print-filter .card.print-page[data-cpdomain] { padding: 8px 12px; margin-bottom: 6px; }
     .step-panel + .step-panel { page-break-before: always; }
@@ -1148,7 +1163,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v2.7</span>
+    <span class="badge">Cloud · v2.8</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1162,7 +1177,7 @@ window.ODC_CLOUD = (function() {
     <div class="brand">
       <img id="topLogo" alt="One Dream Community" class="brand-logo"/>
       <span>One Dream Community</span>
-      <small id="modeLabel">CARE PLAN WORKFLOW · v2.7</small>
+      <small id="modeLabel">CARE PLAN WORKFLOW · v2.8</small>
     </div>
     <span class="mode-chip" id="modeChip" style="display:none">New Client</span>
     <span class="client-chip" id="clientChip" style="display:none">—</span>
@@ -1672,7 +1687,11 @@ window.ODC_CLOUD = (function() {
       <div>
         <h1><em>Care</em> Plan.</h1>
         <p>Auto-generated from completed assessments. Edit any cell to refine. Identified risks and tool results from Step 2 are pre-filled below.</p>
-        <button type="button" class="btn ghost no-print" id="btnImportBudget" style="margin-top:10px">🧾 Import package budget (PDF / paste)</button>
+        <div class="no-print" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+          <button type="button" class="btn ghost" id="btnImportMac">📄 Import MAC Support Plan</button>
+          <button type="button" class="btn ghost" id="btnImportBudget">🧾 Import package budget (PDF / paste)</button>
+          <button type="button" class="btn" id="btnMacDraft">✨ Generate care plan draft</button>
+        </div>
       </div>
       <div class="step-meta"><span class="big" id="cpStepNum">03</span><span id="cpStepLabel">Step Three</span><span class="doc-ref">Doc Ref: Care Plan v0.3 JAN 2026</span></div>
     </div>
@@ -1795,6 +1814,7 @@ function buildInitialAssessment() {
     <div class="grid two">
       ${txt('p_name','Participant name')}
       ${txt('p_dob','Date of birth',{type:'date'})}
+      ${txt('p_mac_id','My Aged Care ID (AC…)')}
       ${txt('p_preferred','Preferred name')}
       ${txt('p_email','Email',{type:'email'})}
       ${txt('p_phone','Phone')}
@@ -2385,6 +2405,7 @@ function buildAnnualAssessment() {
     <div class="grid two">
       ${txt('p_name','Participant name')}
       ${txt('p_dob','Date of birth',{type:'date'})}
+      ${txt('p_mac_id','My Aged Care ID (AC…)')}
       ${txt('p_preferred','Preferred name')}
       ${txt('p_email','Email',{type:'email'})}
       ${txt('p_phone','Phone')}
@@ -4046,6 +4067,9 @@ function buildCarePlan() {
     </div>
   </div>
 
+  <!-- My Aged Care Support Plan summary (v2.8) — rendered from the imported document -->
+  ${typeof macSummaryCard === 'function' ? macSummaryCard(D) : ''}
+
   <!-- Preventative health measures -->
   <div class="card print-page" data-cpdomain="prev">
     <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — Preventative Health Measures</strong>One Dream Community</div><div class="ph-ver">v0.3 · JAN 2026</div></div>
@@ -4519,6 +4543,30 @@ function renderSavedClients() {
           '<button type="button" data-resume="' + c.id + '" style="background:#fff;border:1px solid #7da7d9;color:#2a4d79">Open →</button></div>';
       }).join('') + '</div>';
   }
+  // v2.8 — short-term AT / HM approvals (from the imported MAC Support Plan)
+  // that have expired or expire within 90 days.
+  const SOON = 90 * 24 * 3600 * 1000;
+  const stDue = Object.values(map).map(function(c) {
+    const mac = c.state && c.state.data && c.state.data.__mac;
+    const st = (mac && mac.approvals && mac.approvals.shortTerm) || [];
+    const groups = {};
+    st.forEach(function(x) { const ms = _macDateMs(x.to); if (isNaN(ms)) return; if (!groups[x.group] || ms < groups[x.group]) groups[x.group] = ms; });
+    const items = Object.keys(groups).map(function(g) { return { group: g, ms: groups[g] }; }).filter(function(x) { return x.ms - Date.now() < SOON; }).sort(function(a, b) { return a.ms - b.ms; });
+    return items.length ? { c: c, items: items } : null;
+  }).filter(Boolean).sort(function(a, b) { return a.items[0].ms - b.items[0].ms; });
+  let stHtml = '';
+  if (!q && stDue.length) {
+    stHtml = '<div style="background:#f3eefb;border:1px solid #9b7fd1;border-radius:8px;padding:12px 14px;margin-bottom:14px">' +
+      '<h3 style="margin:0 0 4px;color:#4b2d8a">⏳ Short-term approval expiring (' + stDue.length + ')</h3>' +
+      '<small style="color:#6a4fa8">Assistive technology / home modification funding from the MAC Support Plan ends within 90 days — spend or request a reassessment.</small>' +
+      stDue.map(function(x) {
+        const d2 = (x.c.state && x.c.state.data) || {};
+        return '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid #dfd3f0;margin-top:6px">' +
+          '<div style="flex:1"><strong>' + _escDue(d2.p_name || d2.p_preferred || x.c.name || '(unnamed)') + '</strong> <small style="color:#6a4fa8">· ' +
+          x.items.map(function(it) { const days = Math.ceil((it.ms - Date.now()) / (24 * 3600 * 1000)); return _escDue(it.group) + (days < 0 ? ' expired ' + (-days) + ' days ago' : ' ends in ' + days + ' days'); }).join(' · ') + '</small></div>' +
+          '<button type="button" data-resume="' + x.c.id + '" style="background:#fff;border:1px solid #9b7fd1;color:#4b2d8a">Open →</button></div>';
+      }).join('') + '</div>';
+  }
   let dueHtml = '';
   if (!q && dueClients.length) {
     dueHtml = '<div style="background:#fff8e1;border:1px solid #d4a017;border-radius:8px;padding:12px 14px;margin-bottom:14px">' +
@@ -4566,7 +4614,7 @@ function renderSavedClients() {
   const heading = q
     ? '<h3>Resume a client (' + list.length + ' of ' + totalCount + ')</h3>'
     : '<h3>Resume a client (' + list.length + ')</h3>';
-  root.innerHTML = dueHtml + qbHtml + heading + list.map(c => {
+  root.innerHTML = dueHtml + stHtml + qbHtml + heading + list.map(c => {
     // Prefer the actual participant name (state.data.p_name) over the default
     // "New Client · started ..." label. Fall back to preferred name, then cached label.
     const d = (c.state && c.state.data) || {};
@@ -5347,6 +5395,10 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
     return pdfBufToText(await r.arrayBuffer());
   }
 
+  // Shared with the MAC Support Plan import (v2.8)
+  window.ODC_PDF = { pdfToText: pdfToText, pdfBufToText: pdfBufToText };
+  window.ODC_SPB = { drive: spbDrive, fileText: spbFileText };
+
   function openModal() {
     let bg = document.getElementById('budgetImportBg');
     if (bg) bg.remove();
@@ -5467,6 +5519,862 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
     }
     openModal();
   });
+})();
+
+
+/* ---------- My Aged Care document parser (ODC_MAC) ----------
+   Reads the pdf.js text of a My Aged Care "Support plan" (REP001 — both the
+   pre-Nov-2025 HCP layout and the Support at Home layout) or an "Assessment
+   outcome (Notice of decision)" letter (LTR003) into a structured object.
+   Pure function — no DOM. Shared by the import modal and the draft generator. */
+(function () {
+  function norm(s) { return String(s || '').replace(/ /g, ' ').replace(/[“”]/g, '"').replace(/[’‘]/g, "'").replace(/\s+/g, ' ').trim(); }
+  function clean(s) { return norm(s).replace(/^[•●\-\s]+/, '').replace(/\s+([,.;:])/g, '$1').trim(); }
+  function dmy(s) { const m = String(s || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? ('0' + m[1]).slice(-2) + '/' + ('0' + m[2]).slice(-2) + '/' + m[3] : ''; }
+  function dmyToIso(s) { const m = String(s || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? m[3] + '-' + ('0' + m[2]).slice(-2) + '-' + ('0' + m[1]).slice(-2) : ''; }
+  function longDate(s) { // "06 July 2026" / "3 August 2023" / "2 4 July 2026" -> dd/mm/yyyy
+    const m = String(s || '').match(/(\d{1,2}(?:\s\d)?)\s+(January|February|March|April|May|June|July|August|September|October|November|December)\s+(\d{4})/i);
+    if (!m) return '';
+    const months = ['january','february','march','april','may','june','july','august','september','october','november','december'];
+    return ('0' + m[1].replace(/\s/g, '')).slice(-2) + '/' + ('0' + (months.indexOf(m[2].toLowerCase()) + 1)).slice(-2) + '/' + m[3];
+  }
+  function between(t, startRe, endRe) {
+    const s = t.search(startRe); if (s < 0) return '';
+    const rest = t.slice(s).replace(startRe, '');
+    const e = endRe ? rest.search(endRe) : -1;
+    return (e < 0 ? rest : rest.slice(0, e)).trim();
+  }
+  function bullets(s) { return norm(s).split(/\s*[•●]\s*/).map(clean).filter(Boolean); }
+
+  /* Strip the running page headers / footers that pdf.js folds into the text */
+  function stripHeaders(raw) {
+    let t = norm(raw);
+    t = t.replace(/(?:REP001\s+)?Generated on\s*:\s*\d{1,2}\/\d{1,2}\/\d{4}\s+\d{1,2}:\d{2}(?::\d{2})?\s+Page\s+\d+\s+of\s+\d+\s*/g, ' ');
+    t = t.replace(/LTR003\s*-\s*\d+\s+Assessment outcome \(Notice of decision\)\s+Page\s+\d+\s+of\s+\d+\s*/g, ' ');
+    // "First Last Aged Care ID: AC… DOB: dd/mm/yyyy" page header (first page uses "Date of Birth:" — kept).
+    // Use the client's own name tokens (from the first-page header) so a word before the name is never eaten.
+    const nm = t.match(/(?:Mr|Mrs|Ms|Miss|Dr|Mx)?\s*([A-Z][A-Za-z' \-]+?)\s+Aged Care ID:\s*AC\d+\s+Date of Birth:/);
+    const toks = nm ? nm[1].replace(/^(?:SUPPORT PLAN|Support plan)\s*/i, '').split(/\s+/).filter(Boolean).map(function (w) { return w.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }) : null;
+    const nameRe = toks && toks.length ? '(?:' + toks.join('\\s+') + '|(?:[A-Z][A-Za-z\'\\-]+\\s+){1,3})' : '(?:[A-Z][A-Za-z\'\\-]+\\s+){1,3}';
+    t = t.replace(new RegExp(nameRe + '\\s*Aged Care ID:\\s*AC\\d+\\s+DOB:\\s*\\d{1,2}\\/\\d{1,2}\\/\\d{4}\\s*(?:REP001\\s*)?', 'gi'), ' ');
+    // Repeated section banners at page tops — keep the first occurrence only
+    ['Your assessment summary', 'Assessment Summary', 'Your current care approvals', 'Current care approvals', 'Your goals and recommendations', 'Goals & Recommendations'].forEach(function (ph) {
+      const i = t.indexOf(ph); if (i < 0) return;
+      t = t.slice(0, i + ph.length) + t.slice(i + ph.length).split(ph).join(' ');
+    });
+    return norm(t);
+  }
+
+  function detect(t) {
+    if (/Assessment outcome \(Notice of decision\)|LTR003/.test(t)) return 'notice_of_decision';
+    if (/SUPPORT PLAN|Support plan\s+(?:Mr|Mrs|Ms|Miss|Dr)|Aged Care ID:/.test(t)) return 'support_plan';
+    return 'unknown';
+  }
+
+  /* ---------- SUPPORT PLAN (REP001) ---------- */
+  function parseSupportPlan(t, raw) {
+    const out = { docType: 'support_plan', format: /SaH Classification|Support at Home/.test(t) ? 'sah' : 'hcp' };
+    const hm = t.match(/\b(Mr|Mrs|Ms|Miss|Dr|Mx)\s+([A-Z][A-Za-z' \-]+?)\s+Aged Care ID:\s*(AC\d+)\s+Date of Birth:\s*(\d{1,2}\/\d{1,2}\/\d{4})\s+Age:\s*(\d+)/)
+      || t.match(/()(?:SUPPORT PLAN|Support plan)?\s*([A-Z][A-Za-z' \-]+?)\s+Aged Care ID:\s*(AC\d+)\s+Date of Birth:\s*(\d{1,2}\/\d{1,2}\/\d{4})\s+Age:\s*(\d+)/);
+    out.client = hm ? { title: hm[1] || '', name: norm(hm[2]).replace(/^(SUPPORT PLAN|Support plan)\s*/i, ''), acId: hm[3], dob: dmy(hm[4]), age: hm[5] } : {};
+    if (out.client.name) { // "Soo Nam WOO" -> "Soo Nam Woo"
+      out.client.name = out.client.name.split(' ').map(function (w) { return w.length > 1 && w === w.toUpperCase() ? w[0] + w.slice(1).toLowerCase() : w; }).join(' ');
+    }
+    const g = String(raw || '').match(/Generated on\s*:\s*(\d{1,2}\/\d{1,2}\/\d{4})/);
+    out.generatedOn = g ? dmy(g[1]) : '';
+
+    // ---- Sections ----
+    const sumStart = /(?:Your assessment summary|Assessment Summary)\s+/;
+    const goalsStart = /(?:Your goals and recommendations|Goals & Recommendations)\s+/;
+    const genStart = /General recommendations(?: not associated with any particular goal\(s\))?\s+(?=Recommendation\s+Responsibility|No current general)/;
+    const svcStart = /(?:Your recommended service|Service recommendations)\s+(?=Recommendation:|[A-Z])/;
+    const apprStart = /(?:Your current care approvals|Current care approvals)\s+/;
+
+    const summary = between(t, sumStart, goalsStart);
+    const goalsTxt = between(t, goalsStart, genStart) || between(t, goalsStart, apprStart);
+    const genTxt = between(t, genStart, svcStart) || between(t, genStart, apprStart);
+    let svcTxt = between(t, svcStart, apprStart);
+    // guard: old layout — svcStart may have matched the goal-level "Service recommendations:" inside goals
+    if (svcTxt && goalsTxt.indexOf(svcTxt.slice(0, 60)) >= 0) {
+      const i = t.lastIndexOf('Service recommendations ');
+      const j = t.search(apprStart);
+      svcTxt = i >= 0 && j > i ? t.slice(i + 'Service recommendations '.length, j) : '';
+    }
+    const apprTxt = between(t, apprStart, null);
+
+    out.summary = parseSummary(summary);
+    out.goals = parseGoals(goalsTxt);
+    out.generalRecs = parseGeneralRecs(genTxt);
+    out.serviceRecs = out.format === 'sah' && /Recommendation:/.test(svcTxt) ? parseServiceRecsNew(svcTxt) : parseServiceRecsOld(svcTxt);
+    out.approvals = parseApprovals(apprTxt, out.format);
+    out.assessedOn = findAssessedOn(summary, goalsTxt);
+    out.assessor = findAssessor(summary);
+    return out;
+  }
+
+  function findAssessedOn(summary, goals) {
+    let m = summary.match(/(?:assessment|assessed)[^.]{0,120}?\bon(?: the)?\s+(\d{1,2}\/\d{1,2}\/\d{4})/i);
+    if (m) return dmy(m[1]);
+    m = summary.match(/\bon\s+(\d{1,2}\s+(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{4})/i);
+    if (m) return longDate(m[1]);
+    m = goals.match(/Clinical [Aa]ssessment\s+(\d{1,2}\/\d{1,2}\/\d{4})/);
+    return m ? dmy(m[1]) : '';
+  }
+  function findAssessor(summary) {
+    const m = summary.match(/([A-Z][A-Za-z'\-]+(?: [A-Z][A-Za-z'\-]+){0,3}),\s*(?:Clinical )?Assessor\b/) || summary.match(/(?:Assessment completed by|completed by)\s*([^.]{3,120}?)(?:\.|$)/i);
+    return m ? clean(m[1]) : '';
+  }
+
+  function parseSummary(s) {
+    const o = { raw: s };
+    // Labels appear in a fixed order; search each one after the previous so
+    // words like "Aged Care Assessment Services" are not mistaken for labels.
+    const order = [['introduction', /\bIntroduction\s*:?\s+(?=[A-Z•●])/], ['situation', /\bSituation\s*:?\s+(?=[A-Z•●])/], ['background', /\bBackground\s*:?\s+(?=[A-Z•●])/],
+      ['assessment', /\bAssessment\s*:?\s+(?!Summary|Services|Service|Tool|Team|report|completed|information|occurred|was|of|and)(?=[A-Z•●])/], ['assessment_tools', /\bAssessment tools\s*:?\s+(?=[A-Z•●])/],
+      ['recommendations', /\b(?:Recommendations?)\s*:?\s+(?=[A-Z•●])/], ['additional_recommendations', /\bAdditional Recommendations\s*:?\s+(?=[A-Z•●])/]];
+    let pos = 0; const found = [];
+    order.forEach(function (pair) {
+      const m = s.slice(pos).match(pair[1]);
+      if (!m) return;
+      found.push({ k: pair[0], start: pos + m.index, body: pos + m.index + m[0].length });
+      pos = pos + m.index + m[0].length;
+    });
+    found.forEach(function (f, i) { o[f.k] = clean(s.slice(f.body, i + 1 < found.length ? found[i + 1].start : s.length)); });
+    // Domain narratives inside the Assessment paragraph ("Cognition: … Personal care: …")
+    o.domains = {};
+    const dre = /\b(Cognition|Finances|Personal care|Medication|Medications|Mobility|Sensory|Toileting|Continence|Nutrition|Household|Shopping|Transport|Social|Behaviour|Pain|Skin|Sleep|Communication|Carer|Home environment|Memory)\s*:\s+/g;
+    const body = o.assessment || '';
+    let dm; let dl = null; const dparts = [];
+    while ((dm = dre.exec(body)) !== null) { if (dl) dparts.push([dl.k, body.slice(dl.i, dm.index)]); dl = { k: dm[1], i: dm.index + dm[0].length }; }
+    if (dl) dparts.push([dl.k, body.slice(dl.i)]);
+    dparts.forEach(function (p) { o.domains[p[0].toLowerCase().replace(/\s+/g, '_')] = clean(p[1]); });
+
+    // Diagnoses
+    o.diagnoses = [];
+    let dx = s.match(/[Mm]edical history[^.:]{0,140}?includes?\s*:?\s*((?:\s*[•●]\s*[^•●]+?)+?)(?=\s+(?:Background|Situation|Assessment|Recommendation)\b|$)/);
+    if (dx) o.diagnoses = bullets(dx[1]).map(function (x) { return x.replace(/\s+(Background|Situation|Assessment).*$/, ''); });
+    else {
+      dx = s.match(/(?:[Mm]edical history|[Dd]iagnos(?:es|is)|[Cc]onditions)[^.:]{0,160}?include[s]?\s*:?\s*([^.]+)\./);
+      if (dx) o.diagnoses = clean(dx[1]).split(/,\s*|\s+and\s+/).map(clean).filter(function (x) { return x && x.length < 60; });
+    }
+    // GP / specialists
+    let gp = s.match(/(?:General Practitioner|\bGP\b)\s+(Dr\.?\s+[A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)?)(?:\s*\(([^)]+)\))?/);
+    o.gp = gp ? clean(gp[1]) + (gp[2] ? ' (' + clean(gp[2]) + ')' : '') : '';
+    o.specialists = [];
+    const sre = /\b(Cardiologist|Neurologist|Oncologist|Geriatrician|Psychiatrist|Endocrinologist|Nephrologist|Rheumatologist|Urologist|Respiratory Physician|Gastroenterologist|Dermatologist|Orthopaedic Surgeon|Ophthalmologist)\s+(Dr\.?\s+[A-Z][A-Za-z'\-]+(?:\s+[A-Z][A-Za-z'\-]+)?)/g;
+    let sm; while ((sm = sre.exec(s)) !== null) o.specialists.push(sm[1] + ' ' + sm[2]);
+    // Language / interpreter / living / falls / weight
+    const lang = s.match(/\b(Korean|Chinese|Mandarin|Cantonese|Vietnamese|Arabic|Greek|Italian|Spanish|Japanese|Hindi|Punjabi|Tagalog|Filipino|Polish|Russian|German|French|Croatian|Serbian|Macedonian|Turkish|Persian|Farsi|Dari|Nepali|Thai|Khmer|Indonesian|Portuguese)[ \-]*(?:speaking|interpreter|language)/i);
+    o.language = lang ? lang[1] : '';
+    o.interpreter = /\binterpreter\b/i.test(s);
+    const lv = s.match(/\blives?\s+(alone|with (?:his|her|their) [a-z]+(?: and [a-z]+)?|with [a-z]+)\b[^.]*/i);
+    o.livingSituation = lv ? clean(lv[0]) : '';
+    const falls = s.match(/(\d+|one|two|three|four|five|six|several|multiple)\s+(?:had\s+)?falls?\s+(?:in|over|during)\s+the\s+(?:last|past)\s+([\w ]+?)(?:[.,]| and)/i);
+    o.falls = falls ? clean(falls[0]) : (/\bfalls?\b/i.test(s) ? 'falls mentioned' : '');
+    const wt = s.match(/(?:lost|loss of)\s+(\d+(?:\.\d)?)\s*(?:kg|kilograms?)[^.]*|[Ww]eight\s*-?\s*(\d{2,3})\s*kgs?[^.]*/);
+    o.weight = wt ? clean(wt[0]) : '';
+    return o;
+  }
+
+  function splitConcernGoal(txt) {
+    const s = clean(txt).replace(/^Clinical [Aa]ssessment\s+\d{1,2}\/\d{1,2}\/\d{4}\s*/, '');
+    const sents = s.match(/[^.!?]+[.!?]+|[^.!?]+$/g) || [s];
+    const gi = sents.findIndex(function (x) { return /\b(would like|I want|wants? to|To remain|to be able|to improve|to maintain|to have|I require|I would)\b/i.test(x); });
+    if (gi <= 0) return gi === 0 ? { concern: '', goal: s } : { concern: sents[0] ? clean(sents[0]) : '', goal: clean(sents.slice(1).join(' ')) };
+    return { concern: clean(sents.slice(0, gi).join(' ')), goal: clean(sents.slice(gi).join(' ')) };
+  }
+
+  function parseGoals(g) {
+    const out = [];
+    if (!g) return out;
+    let s = g.replace(/^Concerns, goals and recommendations\s+/, '').replace(/^Areas of [Cc]oncern\s+Goals\s+(?:Strategies to achieve goals|Recommendations)\s+/, '');
+    const chunks = s.split(/Strengths and [Aa]bilities\s*:/);
+    let pendingHead = chunks[0];
+    for (let i = 1; i < chunks.length; i++) {
+      const c = chunks[i];
+      const o = {};
+      Object.assign(o, splitConcernGoal(pendingHead));
+      const diffI = c.search(/Areas of [Dd]ifficulty\s*:/);
+      const motI = c.search(/Motivation to [Aa]chieve \(out of 10\)\s*:/);
+      const genI = c.search(/General recommendations\s*:/);
+      const svcI = c.search(/Service recommendations\s*:/);
+      const ends = [diffI, motI, genI, svcI].filter(function (x) { return x >= 0; });
+      const firstEnd = ends.length ? Math.min.apply(null, ends) : c.length;
+      o.strengths = bullets(c.slice(0, firstEnd));
+      if (diffI >= 0) {
+        const e2 = [motI, genI, svcI].filter(function (x) { return x > diffI; });
+        o.difficulties = bullets(c.slice(diffI, e2.length ? Math.min.apply(null, e2) : c.length).replace(/^Areas of [Dd]ifficulty\s*:/, ''));
+      } else o.difficulties = [];
+      const mm = c.match(/Motivation to [Aa]chieve \(out of 10\)\s*:\s*(\d+)/);
+      o.motivation = mm ? mm[1] : '';
+      o.generalRecs = []; o.serviceRecs = [];
+      let tail = '';
+      if (genI >= 0) {
+        const genBody = c.slice(genI).replace(/^General recommendations\s*:/, '');
+        const sv = genBody.search(/Service recommendations\s*:/);
+        const genOnly = sv >= 0 ? genBody.slice(0, sv) : genBody;
+        o.generalRecs = bullets(genOnly.replace(/No current general recommendations/, '')).filter(function (x) { return !/^\(Responsibility to Action:\s*\)$/.test(x); });
+        if (sv >= 0) {
+          let svBody = genBody.slice(sv).replace(/^Service recommendations\s*:/, '').replace(/No current service recommendations/, '');
+          let strayTail = '';
+          const cutI = svBody.search(/Motivation to [Aa]chieve|Areas of [Dd]ifficulty\s*:|Strengths and [Aa]bilities\s*:/);
+          if (cutI >= 0) { strayTail = svBody.slice(cutI); svBody = svBody.slice(0, cutI); }
+          // bullets run until prose starts (next goal's concern) — split on the first bullet-less sentence
+          const parts = svBody.split(/\s*[•●]\s*/);
+          const head = parts.shift();
+          const recs = []; let rest = clean(head);
+          parts.forEach(function (p, idx) {
+            const m = p.match(/^(.*?[A-Za-z0-9)])\s+((?:Clinical [Aa]ssessment|I would|I require|Mrs?\.? |Ms |[A-Z][a-z]+ (?:has|is|would|was|needs|reported|lives))[\s\S]*)$/);
+            if (m && idx === parts.length - 1) { recs.push(clean(m[1])); rest += ' ' + m[2]; }
+            else recs.push(clean(p));
+          });
+          o.serviceRecs = recs.filter(Boolean);
+          tail = rest + ' ' + strayTail;
+        } else tail = '';
+      } else if (motI >= 0) {
+        tail = c.slice(motI).replace(/Motivation to [Aa]chieve \(out of 10\)\s*:\s*\d+/, '');
+      }
+      // A stray "Motivation…" or "Areas of Difficulty…" belonging to this goal may sit after the recs
+      const strayD = tail.match(/Areas of [Dd]ifficulty\s*:\s*((?:\s*[•●][^•●]+?)+?)(?=\s*Motivation to [Aa]chieve|\s*$)/);
+      if (strayD) { if (!o.difficulties.length) o.difficulties = bullets(strayD[1]); tail = tail.replace(strayD[0], ''); }
+      const strayM = tail.match(/Motivation to [Aa]chieve \(out of 10\)\s*:\s*(\d+)/);
+      if (strayM && !o.motivation) o.motivation = strayM[1];
+      tail = tail.replace(/Motivation to [Aa]chieve \(out of 10\)\s*:\s*\d+/g, '');
+      pendingHead = tail;
+      out.push(o);
+    }
+    return out.filter(function (o) { return o.goal || o.concern || o.serviceRecs.length; });
+  }
+
+  function parseGeneralRecs(g) {
+    const out = [];
+    if (!g || /No current general recommendations/.test(g)) return out;
+    const body = g.replace(/^[\s\S]*?Recommendation\s+Responsibility to [Aa]ction\s+/, '');
+    const re = /(.+?)\s+(Client|Provider|Service provider|Assessor|Carer|Family|Representative|My Aged Care|GP|N\/A)(?=\s+[A-Z]|\s*$)/g;
+    let m; while ((m = re.exec(body)) !== null) out.push({ recommendation: clean(m[1]), responsibility: m[2] });
+    return out;
+  }
+
+  function parseServiceRecsOld(s) {
+    const out = [];
+    if (!s) return out;
+    const re = /([A-Z][A-Za-z,\/&'\- ]+?)\s+Sub-Type\s*(?:[•●]\s*(.*?))?\s*Priority\s+(\w+)\s+(?:Recommended End Date\s+(\S+)\s+(?:[A-Z][A-Za-z ]+?\s+)??)?Recommended frequency and intensity\s+(.*?)\s+Responsibility to [Aa]ction\s*(.*?)\s*Outcome(?:\s+(.*?))?(?=\s+[A-Z][A-Za-z,\/&'\- ]+?\s+Sub-Type|\s*$)/g;
+    let m;
+    while ((m = re.exec(s)) !== null) {
+      const o = { service: clean(m[1]), subType: clean(m[2] || ''), priority: m[3], endDate: m[4] || '', frequency: clean(m[5] || ''), responsibility: clean(m[6] || ''), outcome: clean(m[7] || '') };
+      if (o.frequency.endsWith(o.service)) o.frequency = clean(o.frequency.slice(0, -o.service.length));
+      if (o.frequency === 'N/A N/A') o.frequency = '';
+      const pm = o.outcome.match(/^(.*?)\s*Service provider \(\d\)\s+(.*?)\s+Contact Details\s+(\S+)\s*(.*)$/i);
+      if (pm) { o.outcome = clean(pm[1]); o.provider = clean(pm[2]); o.contact = pm[3]; if (pm[4]) o.outcome += ' ' + clean(pm[4]); }
+      const rc = o.outcome.match(/Referral code given to client\s*([\d\-\s]+)/i);
+      if (rc) o.referralCode = rc[1].replace(/\s/g, '');
+      out.push(o);
+    }
+    return out;
+  }
+
+  function parseServiceRecsNew(s) {
+    const out = [];
+    s.split(/Recommendation:\s+/).slice(1).forEach(function (c) {
+      const o = {};
+      o.service = clean(between(c, /^/, /\s+Service:/) || c.split(' Service:')[0]);
+      o.subType = clean(between(c, /Service:\s*/, /\s*Recommended end date:/));
+      o.endDate = clean(between(c, /Recommended end date:\s*/, /\s*Priority/));
+      o.priority = clean(between(c, /Priority\s*:\s*/, /\s*Recommended frequency/));
+      o.frequency = clean(between(c, /Recommended frequency and intensity:\s*/, /\s*Outcome:/)); if (o.frequency === 'N/A N/A') o.frequency = '';
+      o.outcome = clean(between(c, /Outcome:\s*/, /\s*Responsibility to action:/));
+      o.responsibility = clean(between(c, /Responsibility to action:\s*/, /\s*(?:Service provider|Recommendation:|$)/));
+      o.provider = clean(between(c, /Service provider \(\d\):\s*/, /\s*Contact details:/));
+      o.contact = clean(between(c, /Contact details:\s*/, /\s*Referral status:/));
+      o.status = clean(between(c, /Referral status:\s*/, /\s*(?:Recommendation:|$)/));
+      const rc = o.outcome.match(/Referral code given to client\s*([\d\-\s]+)/i);
+      if (rc) o.referralCode = rc[1].replace(/\s/g, '');
+      if (o.service) out.push(o);
+    });
+    return out;
+  }
+
+  function parseApprovals(a, format) {
+    const out = { raw: a, hcp: null, residential: [], sah: null, groups: [], at: null, hm: null, chsp: [], shortTerm: [] };
+    if (!a) return out;
+    if (format !== 'sah' || /Minimum agreed interim package level/.test(a)) {
+      const re = /([A-Z][A-Za-z ]+?(?:Level \d)?)\s+(\d{2}\/\d{2}\/\d{4})\s+(Not time limited|\d{2}\/\d{2}\/\d{4})\s+Priority:\s*(\S+)\s+Minimum agreed interim package level:\s*(.+?)(?=\s+[A-Z][A-Za-z ]+?(?:Level \d)?\s+\d{2}\/\d{2}\/\d{4}|$)/g;
+      let m;
+      while ((m = re.exec(a)) !== null) {
+        const row = { careType: clean(m[1]).replace(/^(?:Care Type Date approved Date limited Emergency Approval\s+)/, ''), from: m[2], to: m[3], priority: m[4], interim: clean(m[5]) };
+        const lv = row.careType.match(/Home Care Package Level (\d)/);
+        if (lv) { out.hcp = { level: lv[1], from: row.from, to: row.to, priority: row.priority, interimLevel: (row.interim.match(/Level (\d)/) || [])[1] || '' }; }
+        else out.residential.push(row);
+      }
+    }
+    // Support at Home layout
+    const bre = /(SaH Classification \d|AT \w+|HM \w+)\s*-\s*(Ongoing|Short-term)\s*[–\-]\s*(.+?)\s+Service:\s+Approved from:\s+Approved to:\s+Emergency approval:\s+No care reason:\s*([\s\S]*?)(?=\s*(?:SaH Classification \d|AT \w+|HM \w+)\s*-\s*(?:Ongoing|Short-term)|\s*Home modifications\s+HM|\s*Assistive technology\s+AT|\s*Care type:|$)/g;
+    let bm;
+    while ((bm = bre.exec(a)) !== null) {
+      const grp = { level: bm[1], type: bm[2], serviceType: clean(bm[3]), services: [] };
+      const rre = /\s*(.+?)\s+(\d{2}\/\d{2}\/\d{4})\s+(Not time limited|\d{2}\/\d{2}\/\d{4})/g;
+      let rm;
+      while ((rm = rre.exec(bm[4])) !== null) grp.services.push({ name: clean(rm[1]), from: rm[2], to: rm[3] });
+      out.groups.push(grp);
+      if (/^SaH/.test(grp.level)) { out.sah = out.sah || { classification: grp.level.replace('SaH Classification ', ''), from: grp.services[0] ? grp.services[0].from : '' }; }
+      if (/^AT /.test(grp.level)) out.at = { tier: grp.level.replace('AT ', ''), from: grp.services[0] ? grp.services[0].from : '', to: grp.services[0] ? grp.services[0].to : '', services: grp.services.map(function (x) { return x.name; }) };
+      if (/^HM /.test(grp.level)) out.hm = { tier: grp.level.replace('HM ', ''), from: grp.services[0] ? grp.services[0].from : '', to: grp.services[0] ? grp.services[0].to : '', services: grp.services.map(function (x) { return x.name; }) };
+      if (grp.type === 'Short-term') grp.services.forEach(function (sv) { if (/\d{2}\/\d{2}\/\d{4}/.test(sv.to)) out.shortTerm.push({ group: grp.level, service: sv.name, to: sv.to }); });
+    }
+    const cre = /[●•]\s*(.+?)\s+(\d{2}\/\d{2}\/\d{4})\s+(Not time limited|\d{2}\/\d{2}\/\d{4})(?:\s+Service\(s\):\s*(.+?))?(?=\s+Care type:|\s*$)/g;
+    let cm;
+    while ((cm = cre.exec(a)) !== null) out.chsp.push({ careType: clean(cm[1]), from: cm[2], to: cm[3], services: clean(cm[4] || '') });
+    return out;
+  }
+
+  /* ---------- NOTICE OF DECISION (LTR003) ---------- */
+  function parseNotice(t) {
+    const out = { docType: 'notice_of_decision', format: 'sah', client: {}, approvals: { groups: [], shortTerm: [], chsp: [] }, serviceRecs: [], goals: [], generalRecs: [], summary: {} };
+    const nm = t.match(/^(?:.*?\)\s+Page\s+\d+\s+of\s+\d+\s+)?(Mr|Mrs|Ms|Miss|Dr|Mx)\s+([A-Z][A-Za-z' \-]+?)\s+(?=Unit|\d|PO Box|[A-Z][a-z]+ Street)/);
+    if (nm) out.client = { title: nm[1], name: clean(nm[2]) };
+    const id = t.match(/My Aged Care ID:\s*(AC\d+)/); if (id) out.client.acId = id[1];
+    const addr = t.match(/(?:Mr|Mrs|Ms|Miss|Dr|Mx)\s+[A-Z][A-Za-z' \-]+?\s+((?:Unit|\d|PO Box|[A-Z][a-z]+ Street)[\s\S]*?\b[A-Z]{2,3}\s+\d{4})\s+My Aged Care ID/);
+    if (addr) out.client.address = clean(addr[1]).replace(/\s*\/\s*/g, '/').replace(/\s-\s/g, '-');
+    const as = t.match(/assessment with\s+(.+?)\s+of\s+(.+?)\s+assessment organisation on\s+(\d{1,2}\s+\w+\s+\d{4})/);
+    if (as) { out.assessor = clean(as[1]); out.assessorOrg = clean(as[2]).replace(/\s-\s/g, ' - '); out.assessedOn = longDate(as[3]); }
+    const dt = t.match(/Delegate of the System Governor[^.]*?\s(\d{1,2}(?:\s\d)?\s+\w+\s+\d{4})/);
+    out.decisionDate = dt ? longDate(dt[1]) : '';
+    const sd = t.match(/access approval start date is\s+(\d{1,2}\s+\w+\s+\d{4})/);
+    out.accessApprovalStart = sd ? longDate(sd[1]) : '';
+    out.approved = /You have been approved\s+for government/.test(t);
+    out.fundingAllocated = !/You have not (?:yet )?been allocated/.test(t);
+    out.chspApproved = /Commonwealth Home Support\s+Program \(CHSP\)\s+You can now choose/.test(t) || /approved to use some\s+home support services under the Commonwealth/.test(t);
+    const pri = t.match(/Your priority category is (\w+)/);
+    const gre = /Service group\(s\)\s+Classification type\s+Classification level\s+Priority\s+(Home support|Assistive technology|Home modifications|Residential care|Home care)\s+(Ongoing|Short\s*-\s*term)\s+(SaH Classification \d|AT \w+|HM \w+|[A-Z][\w ]+?)\s+(High|Medium|Low|N\/A)/g;
+    let gm;
+    while ((gm = gre.exec(t)) !== null) {
+      const g = { group: gm[1], type: gm[2].replace(/\s*-\s*/, '-'), level: gm[3], priority: gm[4] };
+      const st = t.slice(gm.index + gm[0].length).match(/approved for the service type '([^']+)'/);
+      const after = t.slice(gm.index + gm[0].length), nextI = after.indexOf('Service group(s)'), stI = after.indexOf("service type '");
+      if (st && stI >= 0 && (nextI < 0 || nextI > stI)) g.serviceType = st[1];
+      out.approvals.groups.push(g);
+      if (/^SaH/.test(g.level)) out.approvals.sah = { classification: g.level.replace('SaH Classification ', ''), priority: g.priority };
+      if (/^AT /.test(g.level)) out.approvals.at = { tier: g.level.replace('AT ', ''), priority: g.priority };
+      if (/^HM /.test(g.level)) out.approvals.hm = { tier: g.level.replace('HM ', ''), priority: g.priority };
+    }
+    if (pri && out.approvals.sah && !out.approvals.sah.priority) out.approvals.sah.priority = pri[1];
+    return out;
+  }
+
+  function parse(raw) {
+    const kind = detect(norm(raw));
+    const t = stripHeaders(raw);
+    let o;
+    if (kind === 'notice_of_decision') o = parseNotice(t);
+    else if (kind === 'support_plan') o = parseSupportPlan(t, raw);
+    else o = { docType: 'unknown', client: {}, goals: [], serviceRecs: [], generalRecs: [], approvals: {}, summary: {} };
+    o.parsedAt = new Date().toISOString();
+    o.parsed = kind !== 'unknown' && !!(o.client && (o.client.acId || o.client.name));
+    return o;
+  }
+
+  const api = { parse: parse, stripHeaders: stripHeaders, detect: detect, dmy: dmy, dmyToIso: dmyToIso };
+  if (typeof module !== 'undefined' && module.exports) module.exports = api;
+  if (typeof window !== 'undefined') window.ODC_MAC = api;
+})();
+
+/* ---------- v2.8: My Aged Care Support Plan → Care Plan draft ----------
+   Three parts, all rule-based (no AI, nothing leaves the browser):
+     1. ODC_MAC_MAP   — keyword maps that place a goal / service / approval
+                        into one of the Care Plan domains.
+     2. macSummaryCard — the printable "My Aged Care Support Plan" page that
+                        buildCarePlan() inserts after the snapshot.
+     3. initMacImport  — the "📄 Import MAC Support Plan" modal (SharePoint /
+                        PDF / paste → preview → fill empty Initial Ax fields +
+                        save the parsed plan on the record as data.__mac) and
+                        the "✨ Generate care plan draft" button (Support Plan
+                        + assessment ticks/scores + package budget → every
+                        domain, fill-only-empty, DRAFT-tagged until edited).
+   Stored on the client record:
+     __mac         parsed Support Plan / Notice (see ODC_MAC.parse)
+     __mac_prev    the previous __mac when a newer document replaces it
+     __mac_fill    [keys] filled into the assessment by the import
+     __mac_draft   { fieldKey: generatedText } — a field is "DRAFT" while its
+                   value still equals the generated text; cleared on edit
+     __mac_draft_at  timestamp of the last draft generation
+*/
+const ODC_MAC_MAP = (function () {
+  // Order matters: first match wins for a service / approval line
+  const SERVICE_DOMAIN = [
+    [/continence|toilet/i, 'continence'],
+    [/personal care|self-care|self care|hygiene|showering|activities of daily living/i, 'hygiene'],
+    [/medication|nursing|nurse/i, 'medication'],
+    [/domestic|house ?clean|laundry|linen|home maintenance|home modif|home adjust|garden|hoard|squalor|declutter|home repairs|smoke alarm|home environment/i, 'home'],
+    [/meal|nutrition|diet/i, 'nutrition'],
+    [/counsel|psycholog|mental health|behaviour|dementia advisory/i, 'behaviour'],
+    [/communication aids|communication and information|hearing|vision|interpreter|speech/i, 'communication'],
+    [/wound|skin/i, 'skin'],
+    [/palliat/i, 'palliative'],
+    [/physio|occupational|mobility|equipment|assistive|goods|podiat|allied health|therap|osteo|massage|managing body functions|self-care products|domestic life products/i, 'mobility'],
+    [/social|transport|community|respite|case management|care management|cultural|digital|personal affairs|accompan|shopping|group/i, 'social']
+  ];
+  // Free text (goals, narratives, budget lines) can hit several domains
+  const TEXT_DOMAIN = {
+    continence: /continen|toilet|\bpads?\b|urin|bowel|faec/i,
+    hygiene: /shower|bath|dress|groom|personal care|self-care|self care|hygiene/i,
+    mobility: /mobil|fall|walk|transfer|balance|physio|occupational therap|\bOT\b|stairs|equipment|walker|wheelchair|podiat|rollator|frame/i,
+    nutrition: /\bmeals?\b|diet|nutrition|weight|\beat|food|swallow|appetite|fluid|hydrat/i,
+    medication: /medication|tablet|webster|blister|prescri|nurs/i,
+    cognition: /memory|cognit|dementia|confus|orientat/i,
+    behaviour: /mental health|anxi|depress|mood|counsell|psycholog|behaviour|lonel/i,
+    communication: /vision|hearing|glasses|hearing aid|speech|interpreter|communicat|language/i,
+    skin: /\bskin|wound|pressure injur|ulcer|skin tear/i,
+    pain: /\bpain/i,
+    home: /clean|domestic|housework|laundry|linen|garden|home maintenance|home modif|repairs|smoke alarm|hoard|squalor|declutter|\brails?\b|home safety|home care/i,
+    social: /social|communit|transport|shopping|appointment|accompan|outing|isolat|respite|cultural|church|friend|famil|digital|case management|care management|personal affairs|wellbeing/i,
+    diabetes: /diabet|insulin|\bBGL\b/i,
+    palliative: /palliat|end of life|terminal/i,
+    catheter: /catheter|stoma/i
+  };
+  // Assessor narrative sub-headings (NSW layout) → domain
+  const NARRATIVE_DOMAIN = {
+    personal_care: 'hygiene', toileting: 'continence', continence: 'continence', mobility: 'mobility', nutrition: 'nutrition',
+    medication: 'medication', medications: 'medication', cognition: 'cognition', memory: 'cognition', sensory: 'communication',
+    communication: 'communication', household: 'home', home_environment: 'home', shopping: 'social', transport: 'social',
+    social: 'social', carer: 'social', pain: 'pain', skin: 'skin', behaviour: 'behaviour', sleep: 'behaviour'
+  };
+  function serviceDomain(text) {
+    const t = String(text || '');
+    for (let i = 0; i < SERVICE_DOMAIN.length; i++) if (SERVICE_DOMAIN[i][0].test(t)) return SERVICE_DOMAIN[i][1];
+    return 'social';
+  }
+  function textDomains(text, max) {
+    const t = String(text || ''); const out = [];
+    Object.keys(TEXT_DOMAIN).forEach(function (d) { if (TEXT_DOMAIN[d].test(t)) out.push(d); });
+    return max ? out.slice(0, max) : out;
+  }
+  return { serviceDomain: serviceDomain, textDomains: textDomains, NARRATIVE_DOMAIN: NARRATIVE_DOMAIN };
+})();
+
+function _macEsc(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, function (m) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[m]; }); }
+function _macToday() { const t = new Date(); return ('0' + t.getDate()).slice(-2) + '/' + ('0' + (t.getMonth() + 1)).slice(-2) + '/' + t.getFullYear(); }
+function _macDateMs(dmy) { const m = String(dmy || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/); return m ? new Date(+m[3], +m[2] - 1, +m[1]).getTime() : NaN; }
+
+/* Budget lines saved by the v2.7 import ("• Service — units frequency") */
+function macBudgetLines(D) {
+  return String((D && D.__budget_last) || '').split('\n').map(function (l) {
+    const m = l.match(/^[•\-\s]*(.+?)\s+[—\-]\s+(\S+)\s+(\w+)\s*$/);
+    return m ? { text: m[1].trim(), units: m[2], freq: m[3], domain: ODC_MAC_MAP.serviceDomain(m[1]), line: l.replace(/^[•\s]+/, '') } : null;
+  }).filter(Boolean);
+}
+
+/* Compare the Support Plan's recommended / approved services with the package budget */
+function macCrossCheck(D) {
+  const mac = D.__mac; if (!mac) return null;
+  const budget = macBudgetLines(D);
+  const recs = (mac.serviceRecs || []).map(function (r) {
+    const label = r.service + (r.subType ? ' — ' + r.subType : '');
+    return { label: label, domain: ODC_MAC_MAP.serviceDomain(label), priority: r.priority || '', rec: r };
+  });
+  const approvedDomains = {};
+  ((mac.approvals && mac.approvals.groups) || []).forEach(function (g) { if (g.serviceType) approvedDomains[ODC_MAC_MAP.serviceDomain(g.serviceType)] = true; (g.services || []).forEach(function (sv) { approvedDomains[ODC_MAC_MAP.serviceDomain(sv.name)] = true; }); });
+  if (mac.approvals && mac.approvals.hcp) ['hygiene', 'home', 'nutrition', 'mobility', 'social', 'medication', 'continence'].forEach(function (d) { approvedDomains[d] = true; }); // HCP: whole-of-package
+  const budgetDomains = {}; budget.forEach(function (b) { budgetDomains[b.domain] = true; });
+  recs.forEach(function (r) {
+    r.budgeted = budget.length ? !!budgetDomains[r.domain] : null;
+    r.excluded = /residential/i.test(r.label); // residential approvals are not package services
+  });
+  budget.forEach(function (b) {
+    b.recommended = recs.some(function (r) { return r.domain === b.domain; });
+    b.approved = !!approvedDomains[b.domain];
+  });
+  return { recs: recs, budget: budget, hasBudget: budget.length > 0 };
+}
+
+/* ---- Printable summary page ---- */
+function macSummaryCard(D) {
+  const mac = D.__mac;
+  if (!mac) return '';
+  const e = _macEsc;
+  const a = mac.approvals || {};
+  const isNotice = mac.docType === 'notice_of_decision';
+  const x = macCrossCheck(D) || { recs: [], budget: [], hasBudget: false };
+  const rnSigned = !!(D.cp_sig_rn || D.cp_sig_rn_date);
+  const draftKeys = Object.keys(D.__mac_draft || {}).filter(function (k) { return D[k] === D.__mac_draft[k]; });
+  const approvalsHtml = [];
+  if (a.hcp) approvalsHtml.push('<li><strong>Home Care Package Level ' + e(a.hcp.level) + '</strong> — approved ' + e(a.hcp.from) + (a.hcp.priority ? ' · priority ' + e(a.hcp.priority) : '') + (a.hcp.interimLevel ? ' · minimum interim Level ' + e(a.hcp.interimLevel) : '') + '</li>');
+  if (a.sah) approvalsHtml.push('<li><strong>Support at Home — SaH Classification ' + e(a.sah.classification) + '</strong> (ongoing)' + (a.sah.from ? ' — approved from ' + e(a.sah.from) : '') + (a.sah.priority ? ' · priority ' + e(a.sah.priority) : '') + '</li>');
+  if (a.at) approvalsHtml.push('<li><strong>Assistive technology — AT ' + e(a.at.tier) + '</strong> (short-term)' + (a.at.to ? ' — approved ' + e(a.at.from) + ' to <strong>' + e(a.at.to) + '</strong>' : '') + (a.at.services ? '<br/><small>' + e(a.at.services.join(' · ')) + '</small>' : '') + '</li>');
+  if (a.hm) approvalsHtml.push('<li><strong>Home modifications — HM ' + e(a.hm.tier) + '</strong> (short-term)' + (a.hm.to ? ' — approved ' + e(a.hm.from) + ' to <strong>' + e(a.hm.to) + '</strong>' : '') + (a.hm.services ? '<br/><small>' + e(a.hm.services.join(' · ')) + '</small>' : '') + '</li>');
+  (a.residential || []).forEach(function (r) { approvalsHtml.push('<li>' + e(r.careType) + ' — approved ' + e(r.from) + '</li>'); });
+  if ((a.chsp || []).length) approvalsHtml.push('<li><strong>CHSP</strong>: ' + e(a.chsp.map(function (c) { return c.services || c.careType; }).join(' · ')) + '</li>');
+  if (isNotice && mac.chspApproved && !(a.chsp || []).length) approvalsHtml.push('<li><strong>CHSP</strong> services approved (see referral code letter)</li>');
+  if (isNotice) approvalsHtml.push('<li>Access approval start date ' + e(mac.accessApprovalStart || '—') + ' · funding ' + (mac.fundingAllocated ? 'allocated' : '<strong>not yet allocated</strong> (await LTR008 letter)') + '</li>');
+  const sahGroups = (a.groups || []).filter(function (g) { return /^SaH/.test(g.level); });
+
+  const goalsHtml = (mac.goals || []).map(function (g, i) {
+    return '<tr><td style="width:28px">' + (i + 1) + '</td><td>' + e(g.concern || '—') + '</td><td><strong>' + e(g.goal || '—') + '</strong>' +
+      (g.strengths && g.strengths.length ? '<br/><small>Strengths: ' + e(g.strengths.join('; ')) + '</small>' : '') +
+      (g.difficulties && g.difficulties.length ? '<br/><small>Difficulties: ' + e(g.difficulties.join('; ')) + '</small>' : '') +
+      '</td><td style="width:40px;text-align:center">' + e(g.motivation || '—') + '</td><td>' + e((g.serviceRecs || []).join('; ') || '—') + '</td></tr>';
+  }).join('');
+  const genHtml = (mac.generalRecs || []).map(function (r) { return '<li>' + e(r.recommendation) + ' <small>(' + e(r.responsibility) + ')</small></li>'; }).join('');
+  const recsHtml = x.recs.map(function (r) {
+    const flag = r.excluded ? '' : (r.budgeted === null ? '<small style="color:var(--ink-muted)">no budget imported</small>' : (r.budgeted ? '<span style="color:var(--good)">✓ budgeted</span>' : '<span style="color:var(--warning)">⚠ not in package budget</span>'));
+    const o = r.rec;
+    return '<tr><td>' + e(r.label) + '</td><td>' + e(o.priority || '—') + '</td><td>' + e(o.frequency || '—') + '</td><td>' + e([o.outcome, o.provider ? o.provider + (o.contact ? ' ' + o.contact : '') : '', o.status].filter(Boolean).join(' · ') || '—') + '</td><td>' + flag + '</td></tr>';
+  }).join('');
+  const budgetFlags = x.budget.filter(function (b) { return !b.recommended && !b.approved; });
+  const draftBanner = D.__mac_draft_at && !rnSigned
+    ? '<p class="subtitle" style="background:#fff8e1;border:1px solid #d4a017;padding:6px 10px;border-radius:4px"><strong>Draft care plan generated ' + e(new Date(D.__mac_draft_at).toLocaleDateString('en-AU')) + '</strong> from this Support Plan, the assessment and the package budget — ' + (draftKeys.length ? draftKeys.length + ' field(s) still unreviewed. ' : 'all generated fields have been reviewed. ') + 'An RN must review, edit and sign before the plan is final.</p>'
+    : '';
+  const changed = D.__mac_prev && D.__mac_prev.generatedOn && D.__mac_prev.generatedOn !== mac.generatedOn
+    ? '<p class="subtitle" style="color:var(--warning)">⚠ Support Plan replaced — previous document dated ' + e(D.__mac_prev.generatedOn) + '. Check goals and approvals against the current Care Plan.</p>' : '';
+  return `
+  <div class="card print-page" data-cpdomain="mac">
+    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — My Aged Care Support Plan</strong>One Dream Community</div><div class="ph-ver">v0.3 · JAN 2026</div></div>
+    <div class="sec-head"><h2>My Aged Care Support Plan</h2><span class="ver-tag">${isNotice ? 'Assessment outcome (LTR003)' : 'Support Plan (REP001)'} · ${e(mac.generatedOn || mac.decisionDate || '')}</span></div>
+    <p class="subtitle">Imported ${e(new Date(mac.parsedAt || Date.now()).toLocaleDateString('en-AU'))} · Aged Care ID <strong>${e((mac.client || {}).acId || D.p_mac_id || '—')}</strong> · assessed ${e(mac.assessedOn || '—')}${mac.assessor ? ' by ' + e(mac.assessor) : ''}${mac.assessorOrg ? ' (' + e(mac.assessorOrg) + ')' : ''}</p>
+    ${draftBanner}${changed}
+    <h3 style="margin-top:10px">Approvals</h3>
+    <ul style="margin:4px 0 0 18px;padding:0;font-size:13px">${approvalsHtml.join('') || '<li>—</li>'}</ul>
+    ${sahGroups.length ? '<details class="no-print" style="margin-top:6px;font-size:12.5px"><summary style="cursor:pointer;color:var(--ink-muted)">Approved service list (' + sahGroups.length + ' service groups)</summary><ul style="margin:4px 0 0 18px;padding:0">' + sahGroups.map(function (g) { return '<li><strong>' + e(g.serviceType) + '</strong>: ' + e((g.services || []).map(function (sv) { return sv.name; }).join(', ')) + '</li>'; }).join('') + '</ul></details>' : ''}
+    ${isNotice ? '<p class="subtitle" style="color:var(--warning)">This letter lists approvals only — import the Support Plan (REP001) PDF as well to bring the participant’s goals and service recommendations across.</p>' : ''}
+    ${goalsHtml ? '<h3 style="margin-top:12px">Participant goals</h3><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="text-align:left;color:var(--ink-muted)"><th>#</th><th>Area of concern</th><th>Goal</th><th>Motiv.</th><th>Recommended</th></tr></thead><tbody>' + goalsHtml + '</tbody></table>' : ''}
+    ${genHtml ? '<h3 style="margin-top:12px">General recommendations</h3><ul style="margin:4px 0 0 18px;padding:0;font-size:13px">' + genHtml + '</ul>' : ''}
+    ${recsHtml ? '<h3 style="margin-top:12px">Service recommendations vs package budget</h3><table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="text-align:left;color:var(--ink-muted)"><th>Service</th><th>Priority</th><th>Frequency</th><th>Outcome / provider</th><th>Budget</th></tr></thead><tbody>' + recsHtml + '</tbody></table>' : ''}
+    ${budgetFlags.length ? '<p class="subtitle" style="color:var(--warning);margin-top:8px">⚠ Budgeted but not recommended or approved in the Support Plan — confirm the approval scope: ' + e(budgetFlags.map(function (b) { return b.text; }).join('; ')) + '</p>' : ''}
+    ${!x.hasBudget && !isNotice ? '<p class="subtitle no-print">Tip: run <em>Import package budget</em> and the table above will show which recommended services are funded.</p>' : ''}
+  </div>`;
+}
+
+/* ---- Fill-only-empty helpers ---- */
+function macSetIfEmpty(D, key, val, filled) {
+  if (val == null || val === '' || (Array.isArray(val) && !val.length)) return false;
+  const cur = D[key];
+  const empty = cur == null || cur === '' || cur === 0 || cur === false || (Array.isArray(cur) && !cur.length);
+  if (!empty) return false;
+  D[key] = val; if (filled) filled.push(key); return true;
+}
+
+/* What the import would write into the assessment (previewed, then applied) */
+function macAxPlan(mac, D) {
+  const plan = []; // {key, label, value}
+  const c = mac.client || {}, s = mac.summary || {}, a = mac.approvals || {};
+  function add(key, label, value) { if (value == null || value === '' || (Array.isArray(value) && !value.length)) return; const cur = D[key]; const empty = cur == null || cur === '' || cur === 0 || cur === false || (Array.isArray(cur) && !cur.length); if (empty) plan.push({ key: key, label: label, value: value }); }
+  add('p_mac_id', 'My Aged Care ID', c.acId);
+  add('p_name', 'Participant name', c.name);
+  add('p_dob', 'Date of birth', ODC_MAC.dmyToIso(c.dob)); if (plan.length && plan[plan.length - 1].key === 'p_dob') plan[plan.length - 1].show = c.dob;
+  add('p_address', 'Address', c.address);
+  const dx = (s.diagnoses || []).join(', ');
+  add('med_diagnosis', 'Diagnoses', dx);
+  add('gp_name', 'GP', s.gp);
+  add('p_language', 'Preferred language', s.language);
+  if (s.interpreter) add('p_interpreter', 'Interpreter required', 'Yes');
+  add('p_background', 'Background', s.background ? s.background + (s.livingSituation ? '' : '') : '');
+  const funding = a.hcp ? ['Transitioned Level ' + a.hcp.level] : (a.sah ? ['SAH ' + a.sah.classification] : []);
+  add('p_funding', 'Funding level', funding);
+  // Risk / trigger ticks — only set, never cleared
+  const txt = [s.assessment, s.situation, s.background, s.falls, s.weight, dx].filter(Boolean).join(' ');
+  const dom = s.domains || {};
+  const ticks = [
+    ['ia_falls12m', 'Falls in last 12 months', /\d+\s+(?:had\s+)?falls?|falls? in the (?:last|past)|history of falls|recurrent falls|\bfalls\b.*(?:months|weeks)/i.test(txt) || /\bFalls\b/.test(dx)],
+    ['ia_incontinent', 'Incontinence', /incontinen|wears pads/i.test(dom.toileting || dom.continence || txt)],
+    ['ia_weightLoss', 'Unintended weight loss', /lost \d+\s*(?:kg|kilo)|weight loss|kg down to/i.test(txt)],
+    ['ia_swallowing', 'Swallowing difficulty', /swallow|dysphag|texture.modified/i.test(txt)],
+    ['ia_chronicPain', 'Chronic pain', /chronic pain|constant pain|arthritic pain/i.test(txt)],
+    ['ia_pain_yes', 'Reports pain', /\bpain\b/i.test(txt)],
+    ['ia_mobilityAid', 'Uses mobility aid', /(?:uses|with|using)\s+(?:a\s+)?(?:walking|mobility)\s+(?:aid|frame|stick)|\b(?:walker|wheelchair|4WW|rollator)\b/i.test(txt) && !/without (?:a )?(?:walking|mobility) aid/i.test(txt)],
+    ['ia_balanceIssue', 'Balance / transfer assistance', /balance|leans on furniture|assist(?:ance)? with transfers|unsteady|dizz/i.test(txt)],
+    ['ia_hygieneAssist', 'Requires hygiene assistance', /assist(?:ance)?\s+with\s+(?:showering|dressing|personal care)|benefit (?:with|from) assistance with showering|requires assistance (?:to )?dress/i.test(txt)],
+    ['ia_socialIsolation', 'Socially isolated', /lonel|isolat|no informal supports|little close family/i.test(txt)],
+    ['ia_dementia', 'Dementia diagnosed', /dementia|alzheimer/i.test(dx)],
+    ['ia_cognitiveImpair', 'Cognitive impairment', /cognitive impair|memory (?:loss|changes|concerns)|\bMMSE\b|\bconfus/i.test(txt)],
+    ['ia_diabetes', 'Diabetes', /diabet/i.test(dx)],
+    ['ia_visionIssue', 'Vision concerns', /vision impair|macular|cataract|legally blind|low vision|visual impair/i.test(txt)],
+    ['ia_hearingIssue', 'Hearing deficit', /hearing (?:aid|impair|loss)|hard of hearing|deaf/i.test(txt)],
+    ['ia_homeSafety', 'Home safety risk', /smoke alarm|home safety|hazard|hoard|squalor|home modif|grab rails?/i.test(txt)],
+    ['ia_noTransport', 'No transport', /does not drive|no longer driv|relies on .{0,40}transport|benefit from assistance[^.]{0,40}transport|unable to (?:drive|use public transport)/i.test(txt + ' ' + (dom.transport || ''))],
+    ['ia_polypharmacy', '> 4 medications', /polypharmacy|more than (?:four|4) medications/i.test(txt)],
+    ['ia_skinIssue', 'Skin condition', /fragile skin|skin (?:tear|condition)|pressure (?:injury|sore)|ulcer/i.test(txt)],
+    ['ia_palliative', 'Palliative', /palliative|end.of.life/i.test(txt)]
+  ];
+  ticks.forEach(function (t) { if (t[2] && !D[t[0]]) plan.push({ key: t[0], label: t[1], value: 1, tick: true }); });
+  return plan;
+}
+
+/* ---- Draft generator ---- */
+function macGenerateDraft(D, opts) {
+  opts = opts || {};
+  const mac = D.__mac || {};
+  const draft = D.__mac_draft = D.__mac_draft || {};
+  const written = [];
+  const today = _macToday();
+  const srcDate = mac.generatedOn || mac.assessedOn || '';
+  const srcTag = 'MAC Support Plan' + (srcDate ? ' ' + srcDate : '');
+  const x = macCrossCheck(D) || { recs: [], budget: [], hasBudget: false };
+  const dom = (mac.summary && mac.summary.domains) || {};
+  const perDom = {};
+  function bucket(d) { return perDom[d] = perDom[d] || { goals: [], needs: [], intervention: [], tasks: [], providers: [], days: [], aids: [] }; }
+  const shown = {};
+  document.querySelectorAll('#careplanContent .cp-domain[data-cpdomain]').forEach(function (c) { shown[c.dataset.cpdomain] = true; });
+  function tgt(d) { return shown[d] ? d : (d === 'cognition' || d === 'communication' ? 'behaviour' : (d === 'continence' ? 'hygiene' : (d === 'diabetes' ? 'medication' : (d === 'pain' || d === 'skin' || d === 'palliative' || d === 'catheter' ? 'medication' : 'social')))); }
+
+  // 1. Participant goals → domain goals (own words, per the Quality Standards)
+  (mac.goals || []).forEach(function (g) {
+    const text = (g.goal || '').trim(); if (!text) return;
+    let ds = ODC_MAC_MAP.textDomains((g.goal || '') + ' ' + (g.concern || '') + ' ' + (g.serviceRecs || []).join(' '), 3);
+    if (!ds.length) ds = ['social'];
+    ds.forEach(function (d) { bucket(tgt(d)).goals.push('Participant goal (' + srcTag + '): ' + text); });
+    (g.difficulties || []).forEach(function (df) {
+      if (/speaking|language|interpreter/i.test(df)) { ['hygiene', 'social'].forEach(function (d) { bucket(tgt(d)).intervention.push('Allocate ' + (mac.summary && mac.summary.language ? mac.summary.language + '-speaking' : 'language-matched') + ' support workers where possible — ' + df.replace(/^[A-Z][a-z]+ [A-Z][a-z]+ would require /, '')); }); }
+    });
+  });
+  // 2. Assessor narrative → care needs
+  Object.keys(dom).forEach(function (k) {
+    const d = ODC_MAC_MAP.NARRATIVE_DOMAIN[k]; if (!d || !dom[k]) return;
+    bucket(tgt(d)).needs.push('Assessor summary (' + srcTag + ', ' + k.replace(/_/g, ' ') + '): ' + dom[k]);
+  });
+  if (!Object.keys(dom).length && mac.summary && mac.summary.situation) bucket(tgt('social')).needs.push('Assessor summary (' + srcTag + '): ' + mac.summary.situation);
+  // 3. Assessment ticks / scores → standard interventions (RN to tailor)
+  const LIB = [
+    ['mobility', D.ia_falls12m, 'Falls prevention: review footwear, lighting and trip hazards; encourage prescribed exercises; support worker to stand by for transfers; report any fall to the RN the same day.'],
+    ['mobility', D.frat_total && /High/i.test(D.frat_risk || ''), 'FRAT high risk (' + D.frat_total + '): refer to physiotherapy / OT for mobility and home-safety review; consider personal alarm.'],
+    ['mobility', D.ia_mobilityAid, 'Check mobility aid condition at each visit; prompt use of the aid for all walking.'],
+    ['hygiene', D.ia_hygieneAssist, 'Support worker to assist with showering / dressing as agreed, promoting independence and dignity; non-slip mat and shower chair in place.'],
+    ['continence', D.ia_incontinent, 'Continence products available; prompt toileting; skin checked and reported; refer to continence nurse if pattern changes.'],
+    ['nutrition', D.ia_weightLoss || D.ia_appetiteIssue, 'Monitor weight monthly (MNA score ' + (D.mna_score || '—') + '); encourage small frequent meals and fluids; refer to dietitian if further loss.'],
+    ['nutrition', D.ia_swallowing, 'Texture-modified diet / fluids as prescribed (IDDSI ' + (D.cp_nutrition_iddsi_meal || '—') + '); upright for meals; report coughing or choking.'],
+    ['medication', D.ia_polypharmacy || D.med_assist === 'Yes', 'Medication prompting from Webster pack / blister pack; GP medication summary on file; report missed doses.'],
+    ['medication', D.ia_anticoagulant, 'On anticoagulant: observe and report bruising or bleeding; avoid injury.'],
+    ['medication', D.ia_insulin || D.ia_diabetes, 'Diabetes: BGL monitoring as per GP plan; hypo signs known to workers; foot care checked.'],
+    ['cognition', D.ia_cognitiveImpair || D.ia_dementia, 'Consistent workers and routine; simple one-step instructions; memory aids; monitor for changes and report to RN / GP.'],
+    ['behaviour', D.ia_socialIsolation, 'Social connection: regular social support visits / group activity; check mood at visits and report low mood.'],
+    ['communication', D.p_interpreter === 'Yes' || D.ia_hearingIssue || D.ia_visionIssue || D.ia_speechIssue, 'Communication: ' + [D.p_interpreter === 'Yes' ? 'book interpreter for reviews and appointments' : '', D.ia_hearingIssue ? 'face participant, speak clearly, hearing aid checked' : '', D.ia_visionIssue ? 'good lighting, large print, keep walkways clear' : '', D.ia_speechIssue ? 'allow time, use communication aids' : ''].filter(Boolean).join('; ') + '.'],
+    ['skin', D.ia_skinIssue || D.ia_pressureInjuryRisk || D.ia_woundActive, 'Skin: check pressure areas each visit; moisturise; report redness, tears or wounds to the RN; wound care as per RN plan.'],
+    ['pain', D.ia_pain_yes || D.ia_chronicPain, 'Pain: monitor and record pain (worst ' + (D.pain_worst || '—') + ', average ' + (D.pain_avg || '—') + '); analgesia as prescribed; report uncontrolled pain to GP.'],
+    ['home', D.ia_homeSafety || D.ia_home_repairs === 'Yes', 'Home safety: smoke alarm tested; remove trip hazards; home maintenance / modifications arranged through the package.'],
+    ['social', D.ia_noTransport, 'Transport: arrange package transport / accompanied activities for appointments and shopping.'],
+    ['palliative', D.ia_palliative, 'Palliative approach: comfort-focused care; Advance Care Directive discussed; palliative service involved.']
+  ];
+  LIB.forEach(function (r) { if (r[1]) bucket(tgt(r[0])).intervention.push(r[2]); });
+  // 4. General recommendations → PEEP / home / GP
+  (mac.generalRecs || []).forEach(function (r) {
+    const t = r.recommendation + ' (responsibility: ' + r.responsibility + ')';
+    if (/emergency|evacuation/i.test(r.recommendation)) { if (!D.cp_peep_evac) { D.cp_peep_evac = draft.cp_peep_evac = srcTag + ' recommendation: ' + t; written.push('cp_peep_evac'); } }
+    else if (/GP|health professional/i.test(r.recommendation)) { if (!D.cp_prev_gp) { D.cp_prev_gp = draft.cp_prev_gp = t; written.push('cp_prev_gp'); } }
+    else bucket(tgt('home')).tasks.push(srcTag + ' recommendation: ' + t);
+  });
+  // 5. Service recommendations → tasks / providers / days (+ budget cross-check)
+  x.recs.forEach(function (r) {
+    if (r.excluded) return;
+    const b = bucket(tgt(r.domain));
+    const o = r.rec;
+    b.tasks.push('• ' + r.label + ' — recommended in ' + srcTag + (o.priority ? ', priority ' + o.priority : '') + (o.outcome ? '; ' + o.outcome : '') + (r.budgeted === false ? ' ⚠ not in current package budget' : ''));
+    if (o.provider) b.providers.push(o.provider + (o.contact ? ' · ' + o.contact : '') + ' — ' + r.label + (o.status ? ' (' + o.status + ')' : ''));
+    if (o.frequency) b.days.push(r.label + ': ' + o.frequency + ' (assessor recommendation)');
+  });
+  // 6. Budget lines → tasks / days
+  x.budget.forEach(function (bl) {
+    const b = bucket(tgt(bl.domain));
+    b.tasks.push('• ' + bl.text + ' — ' + bl.units + ' ' + bl.freq + ' (package budget)' + (!bl.recommended && !bl.approved ? ' ⚠ not in Support Plan' : ''));
+    b.days.push(bl.text + ': ' + bl.units + ' ' + bl.freq);
+  });
+  // 7. Approvals → aids / tasks
+  const a = mac.approvals || {};
+  if (a.at) bucket(tgt('mobility')).aids.push('Assistive technology approved — AT ' + a.at.tier + (a.at.to ? ', funding available to ' + a.at.to : '') + (a.at.services ? ': ' + a.at.services.join(', ') : '') + '. OT / physio prescription required before purchase.');
+  if (a.hm) bucket(tgt('home')).aids.push('Home modifications approved — HM ' + a.hm.tier + (a.hm.to ? ', funding available to ' + a.hm.to : '') + '. OT assessment and quotes required.');
+  (a.groups || []).filter(function (g) { return /^SaH/.test(g.level) && g.serviceType; }).forEach(function (g) {
+    const d = tgt(ODC_MAC_MAP.serviceDomain(g.serviceType));
+    bucket(d).tasks.push('Approved under ' + g.level + ' — ' + g.serviceType + ': ' + (g.services || []).map(function (sv) { return sv.name; }).join(', '));
+  });
+  (mac.serviceRecs || []).filter(function (r) { return /goods|equipment|assistive/i.test(r.service); }).forEach(function (r) {
+    bucket(tgt(/communication/i.test(r.subType) ? 'communication' : 'mobility')).aids.push(r.service + (r.subType ? ' — ' + r.subType : '') + ' (recommended in ' + srcTag + (r.outcome ? '; ' + r.outcome : '') + ')');
+  });
+  // 8. Write — fill only empty fields; remember generated text for the DRAFT tag
+  function uniq(arr) { const seen = {}; return arr.filter(function (v) { if (seen[v]) return false; seen[v] = 1; return true; }); }
+  Object.keys(perDom).forEach(function (d) {
+    const b = perDom[d];
+    const map = { goals: 'goals', needs: 'needs', intervention: 'intervention', tasks: 'tasks', providers: 'providers', days: 'days', aids: 'aids' };
+    Object.keys(map).forEach(function (f) {
+      const lines = uniq(b[f]); if (!lines.length) return;
+      const key = 'cp_' + d + '_' + map[f];
+      const text = lines.join('\n');
+      const cur = D[key] ? String(D[key]).trim() : '';
+      if (!cur || (opts.force && draft[key] === D[key])) { D[key] = text; draft[key] = text; written.push(key); }
+    });
+  });
+  D.__mac_draft_at = Date.now();
+  return written;
+}
+
+/* DRAFT tags: a generated field keeps its tag while its text is unchanged */
+function macApplyDraftTags() {
+  const D = state.data, draft = D.__mac_draft || {};
+  const root = document.getElementById('careplanContent'); if (!root) return;
+  root.querySelectorAll('.mac-draft-tag').forEach(function (t) { t.remove(); });
+  Object.keys(draft).forEach(function (k) {
+    const el = root.querySelector('[data-key="' + k + '"]'); if (!el) return;
+    if (String(D[k] || '') !== String(draft[k] || '')) { delete draft[k]; return; }
+    el.style.boxShadow = 'inset 3px 0 0 #d4a017';
+    const tag = document.createElement('span');
+    tag.className = 'mac-draft-tag no-print';
+    tag.style.cssText = 'display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;color:#6b4e00;background:#fff8e1;border:1px solid #d4a017;border-radius:3px;padding:1px 6px;margin:4px 0 0';
+    tag.textContent = 'DRAFT — RN to review';
+    el.insertAdjacentElement('afterend', tag);
+    const clear = function () { if (String(el.value) !== String(draft[k] || '')) { delete draft[k]; el.style.boxShadow = ''; tag.remove(); el.removeEventListener('input', clear); } };
+    el.addEventListener('input', clear);
+  });
+}
+
+(function initMacImport() {
+  const btnImport = document.getElementById('btnImportMac');
+  const btnDraft = document.getElementById('btnMacDraft');
+  if (!btnImport || !btnDraft) return;
+
+  async function spFindMacPdfs() {
+    const driveId = await ODC_SPB.drive();
+    const queries = ['Support plan', 'Finalised', 'Notice of decision', 'Assessment outcome'];
+    const seen = {}; let items = [];
+    for (const q of queries) {
+      try {
+        const res = await ODC_CLOUD.graph('/drives/' + driveId + "/root/search(q='" + q + "')?$top=60&$select=id,name,lastModifiedDateTime,parentReference,webUrl,file");
+        (res.value || []).forEach(function (it) { if (it.file && /\.pdf$/i.test(it.name || '') && !seen[it.id]) { seen[it.id] = 1; items.push(it); } });
+      } catch (e) { console.warn('MAC search failed for', q, e); }
+    }
+    const toks = (state.data.p_name || '').toLowerCase().split(/\s+/).filter(function (w) { return w.length > 2; });
+    const acid = (state.data.p_mac_id || '').toUpperCase();
+    return items.filter(function (it) {
+      let hay = '';
+      try { hay = decodeURIComponent(((it.parentReference && it.parentReference.path) || '') + ' ' + (it.webUrl || '') + ' ' + it.name).toLowerCase(); } catch (e) { hay = ((it.webUrl || '') + ' ' + it.name).toLowerCase(); }
+      if (acid && hay.indexOf(acid.toLowerCase()) >= 0) return true;
+      if (!toks.length) return true;
+      return toks.filter(function (w) { return hay.indexOf(w) >= 0; }).length >= Math.min(2, toks.length);
+    }).sort(function (a, b) { return new Date(b.lastModifiedDateTime) - new Date(a.lastModifiedDateTime); });
+  }
+
+  function openModal() {
+    let bg = document.getElementById('macImportBg');
+    if (bg) bg.remove();
+    bg = document.createElement('div');
+    bg.id = 'macImportBg'; bg.className = 'no-print';
+    bg.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(26,32,23,.45);z-index:9999;align-items:center;justify-content:center';
+    bg.innerHTML = '<div style="background:#fff;border-radius:8px;max-width:640px;width:94%;max-height:88vh;overflow-y:auto;padding:20px">' +
+      '<h2 class="serif" style="margin:0 0 4px">Import <em>MAC Support Plan</em></h2>' +
+      '<p style="margin:0 0 12px;font-size:12.5px;color:var(--ink-muted)">Reads the My Aged Care <strong>Support plan</strong> (REP001) or <strong>Assessment outcome</strong> letter (LTR003) — downloaded from the My Aged Care portal or filed in the client’s SharePoint folder. Nothing already written in the assessment is overwritten.</p>' +
+      '<div style="margin-bottom:12px"><span style="font-size:11px;text-transform:uppercase;letter-spacing:.02em;color:var(--ink-muted);font-weight:600">Method 0 — SharePoint</span><br/><button type="button" class="mini-btn" id="mcSpFind" style="margin-top:4px">🔍 Find this client’s Support Plan on SharePoint</button><div id="mcSpList" style="margin-top:6px;max-height:160px;overflow-y:auto"></div></div>' +
+      '<label class="field" style="display:block;margin-bottom:10px"><span>Method 1 — PDF file</span><input type="file" id="mcPdf" accept="application/pdf"/></label>' +
+      '<label class="field" style="display:block;margin-bottom:10px"><span>Method 2 — or paste the document text</span><textarea id="mcPaste" rows="3" placeholder="Paste the Support Plan text here…"></textarea></label>' +
+      '<div id="mcPreview"></div>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button type="button" class="btn ghost" id="mcCancel">Cancel</button><button type="button" class="btn" id="mcGo">Read document</button></div></div>';
+    document.body.appendChild(bg);
+    bg.querySelector('#mcCancel').addEventListener('click', function () { bg.remove(); });
+    bg.addEventListener('click', function (e) { if (e.target === bg) bg.remove(); });
+
+    bg.querySelector('#mcSpFind').addEventListener('click', async function () {
+      const fb = bg.querySelector('#mcSpFind'), listEl = bg.querySelector('#mcSpList');
+      fb.disabled = true; fb.textContent = 'Searching SharePoint…';
+      try {
+        const items = await spFindMacPdfs();
+        listEl.innerHTML = items.length ? items.slice(0, 10).map(function (it) {
+          let folder = '';
+          try { folder = decodeURIComponent(((it.parentReference && it.parentReference.path) || '').split('root:').pop() || ''); } catch (e) {}
+          return '<button type="button" data-mcid="' + it.id + '" style="display:block;width:100%;text-align:left;padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer;margin-bottom:4px"><strong style="font-size:12.5px">' + _macEsc(it.name) + '</strong><br/><small style="color:var(--ink-muted)">' + _macEsc(folder) + ' · ' + new Date(it.lastModifiedDateTime).toLocaleDateString() + '</small></button>';
+        }).join('') : '<div style="font-size:12px;color:var(--ink-muted);padding:6px 0">No Support Plan / Notice of decision PDF found in this client’s folders — use Method 1 or 2.</div>';
+      } catch (err) { listEl.innerHTML = '<div style="font-size:12px;color:var(--warning);padding:6px 0">Search failed: ' + _macEsc(err.message || err) + '</div>'; }
+      fb.disabled = false; fb.textContent = '🔍 Find this client’s Support Plan on SharePoint';
+      listEl.onclick = async function (e) {
+        const b2 = e.target.closest('[data-mcid]'); if (!b2) return;
+        b2.disabled = true; b2.style.opacity = .6;
+        try { bg.querySelector('#mcPaste').value = await ODC_SPB.fileText(b2.dataset.mcid); bg.querySelector('#mcGo').click(); }
+        catch (err) { alert('Could not read that PDF: ' + (err.message || err)); b2.disabled = false; b2.style.opacity = 1; }
+      };
+    });
+
+    let parsed = null, axPlan = [];
+    bg.querySelector('#mcGo').addEventListener('click', async function () {
+      const go = bg.querySelector('#mcGo');
+      if (parsed) { applyImport(parsed, axPlan, bg); return; }
+      go.disabled = true; go.textContent = 'Reading…';
+      try {
+        let text = (bg.querySelector('#mcPaste').value || '').trim();
+        const f = bg.querySelector('#mcPdf').files[0];
+        if (!text && f) text = await ODC_PDF.pdfToText(f);
+        if (!text) { alert('Choose a PDF or paste the document text first.'); go.disabled = false; go.textContent = 'Read document'; return; }
+        const p = ODC_MAC.parse(text);
+        if (!p.parsed) { alert('This does not look like a My Aged Care Support Plan or Assessment outcome letter.'); go.disabled = false; go.textContent = 'Read document'; return; }
+        parsed = p; axPlan = macAxPlan(p, state.data);
+        bg.querySelector('#mcPreview').innerHTML = previewHtml(p, axPlan);
+        go.disabled = false; go.textContent = 'Apply to this client';
+      } catch (err) { alert('Import failed: ' + (err.message || err)); go.disabled = false; go.textContent = 'Read document'; }
+    });
+  }
+
+  function previewHtml(p, axPlan) {
+    const e = _macEsc, c = p.client || {}, a = p.approvals || {};
+    const cur = (state.data.p_name || '').trim().toLowerCase();
+    const imp = (c.name || '').toLowerCase();
+    const overlap = cur ? cur.split(/\s+/).filter(function (w) { return w.length > 2 && imp.indexOf(w) !== -1; }).length : 1;
+    const idMismatch = state.data.p_mac_id && c.acId && state.data.p_mac_id.trim().toUpperCase() !== c.acId;
+    const warn = (!overlap || idMismatch) ? '<p style="background:var(--warning-soft);color:var(--warning);padding:6px 10px;border-radius:4px;font-size:12.5px">⚠ This document is for <strong>' + e(c.name || c.acId) + '</strong> but the open client is <strong>' + e(state.data.p_name || '(no name yet)') + (state.data.p_mac_id ? ' · ' + e(state.data.p_mac_id) : '') + '</strong>. Apply only if you are sure.</p>' : '';
+    const appr = [a.hcp ? 'HCP Level ' + a.hcp.level : '', a.sah ? 'SaH Classification ' + a.sah.classification : '', a.at ? 'AT ' + a.at.tier + (a.at.to ? ' to ' + a.at.to : '') : '', a.hm ? 'HM ' + a.hm.tier + (a.hm.to ? ' to ' + a.hm.to : '') : '', (a.chsp || []).length ? 'CHSP ×' + a.chsp.length : '', (a.residential || []).length ? a.residential.map(function (r) { return r.careType; }).join(', ') : ''].filter(Boolean).join(' · ');
+    return warn +
+      '<div style="border:1px solid var(--line);border-radius:6px;padding:10px 12px;font-size:12.5px">' +
+      '<div><strong>' + e(p.docType === 'notice_of_decision' ? 'Assessment outcome (Notice of decision)' : 'Support Plan') + '</strong> — ' + e(c.name || '') + ' · ' + e(c.acId || '') + (c.dob ? ' · DOB ' + e(c.dob) : '') + (p.generatedOn ? ' · generated ' + e(p.generatedOn) : '') + (p.decisionDate ? ' · dated ' + e(p.decisionDate) : '') + '</div>' +
+      '<div style="margin-top:4px"><strong>Approvals:</strong> ' + e(appr || '—') + '</div>' +
+      '<div style="margin-top:4px"><strong>Goals:</strong> ' + ((p.goals || []).length ? (p.goals || []).length + ' — ' + e((p.goals[0].goal || '').slice(0, 120)) + ((p.goals[0].goal || '').length > 120 ? '…' : '') : '—') + '</div>' +
+      '<div style="margin-top:4px"><strong>Service recommendations:</strong> ' + e((p.serviceRecs || []).map(function (r) { return r.service + (r.subType ? ' (' + r.subType + ')' : ''); }).join(', ') || '—') + '</div>' +
+      '<div style="margin-top:4px"><strong>General recommendations:</strong> ' + e((p.generalRecs || []).map(function (r) { return r.recommendation; }).join(', ') || '—') + '</div>' +
+      (p.docType === 'notice_of_decision' ? '<div style="margin-top:6px;color:var(--warning)">This letter holds approvals only — import the Support Plan PDF too for goals and recommendations.</div>' : '') +
+      '</div>' +
+      '<h3 style="margin:12px 0 4px;font-size:13px">Will be filled into the assessment (empty fields only)</h3>' +
+      (axPlan.length ? '<div style="max-height:170px;overflow-y:auto;border:1px solid var(--line);border-radius:6px;padding:6px 10px">' + axPlan.map(function (f, i) {
+        return '<label style="display:flex;gap:8px;align-items:flex-start;font-size:12.5px;padding:3px 0"><input type="checkbox" data-mcfill="' + i + '" checked style="margin-top:3px"/><span><strong>' + e(f.label) + '</strong>' + (f.tick ? ' <small style="color:var(--ink-muted)">(tick)</small>' : ': ' + e(f.show || (Array.isArray(f.value) ? f.value.join(', ') : String(f.value).slice(0, 160))) + (String(f.value).length > 160 ? '…' : '')) + '</span></label>';
+      }).join('') + '</div>' : '<div style="font-size:12.5px;color:var(--ink-muted)">Nothing to fill — the assessment already has these details.</div>') +
+      '<label style="display:flex;gap:8px;align-items:center;font-size:12.5px;margin-top:10px"><input type="checkbox" id="mcDraftAfter" checked/> Generate the care plan draft straight after import</label>';
+  }
+
+  function applyImport(p, axPlan, bg) {
+    const D = state.data;
+    const filled = D.__mac_fill = D.__mac_fill || [];
+    bg.querySelectorAll('[data-mcfill]').forEach(function (cb) {
+      if (!cb.checked) return;
+      const f = axPlan[+cb.dataset.mcfill];
+      if (macSetIfEmpty(D, f.key, f.value, null)) filled.push(f.key);
+    });
+    // keep the record light: the raw text is only needed while parsing
+    try { if (p.summary) delete p.summary.raw; if (p.approvals) delete p.approvals.raw; } catch (e) {}
+    if (D.__mac && D.__mac.docType === p.docType && D.__mac.generatedOn !== p.generatedOn) { D.__mac_prev = D.__mac; delete D.__mac_prev.summary; }
+    if (p.docType === 'notice_of_decision' && D.__mac && D.__mac.docType === 'support_plan') {
+      // keep the Support Plan as the main record; attach the decision letter
+      D.__mac_notice = p;
+    } else D.__mac = p;
+    const doDraft = bg.querySelector('#mcDraftAfter') && bg.querySelector('#mcDraftAfter').checked;
+    bg.remove();
+    // refresh visible forms
+    ['initialContent', 'annualContent', 'careplanContent'].forEach(function (id) { const el = document.getElementById(id); if (el && el.children.length) applyState(el); });
+    if (document.querySelector('#careplanContent .cp-domain')) renderCarePlan();
+    autoSave();
+    if (doDraft && p.docType === 'support_plan') runDraft();
+    else alert('Support Plan imported — ' + (filled.length ? filled.length + ' assessment field(s) filled. ' : '') + 'The "My Aged Care Support Plan" page is now part of the Care Plan.');
+  }
+
+  function runDraft() {
+    if (!state.data.__mac) {
+      if (confirm('No MAC Support Plan has been imported for this client.\n\nImport one now? (Cancel = generate from the assessment and budget only.)')) { openModal(); return; }
+    }
+    if (!document.querySelector('#careplanContent .cp-domain')) goTo('careplan');
+    const written = macGenerateDraft(state.data, {});
+    renderCarePlan();
+    autoSave();
+    const n = written.length;
+    alert(n ? 'Care plan draft generated — ' + n + ' field(s) filled across the domains and tagged DRAFT.\n\nAn RN must review each tagged field, edit as needed and sign the Care Plan.' : 'Nothing new to add — every domain field that could be drafted already has text. Clear a field and generate again to re-draft it.');
+  }
+
+  btnImport.addEventListener('click', openModal);
+  btnDraft.addEventListener('click', runDraft);
+
+  // DRAFT tags whenever the Care Plan is (re)rendered
+  const _origRender = window.renderCarePlan;
+  if (typeof _origRender === 'function' && !_origRender.__macWrapped) {
+    window.renderCarePlan = function () { const r = _origRender.apply(this, arguments); try { macApplyDraftTags(); } catch (e) { console.warn(e); } return r; };
+    window.renderCarePlan.__macWrapped = true;
+  }
 })();
 
 /* ---------- Import from Onboarding (All Onboarding Forms app) ----------
