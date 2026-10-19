@@ -5260,9 +5260,13 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
     return b;
   }
 
-  function buildSummary(b) {
+  function todayDMY() {
     const td = new Date();
-    const today = ('0' + td.getDate()).slice(-2) + '/' + ('0' + (td.getMonth() + 1)).slice(-2) + '/' + td.getFullYear();
+    return ('0' + td.getDate()).slice(-2) + '/' + ('0' + (td.getMonth() + 1)).slice(-2) + '/' + td.getFullYear();
+  }
+
+  function buildSummary(b) {
+    const today = todayDMY();
     const L = [];
     L.push('— Budgeted services (CareTok Package Overview' + (b.date ? ', ' + b.date : '') + ') —');
     if (b.services && b.services.length) {
@@ -5334,7 +5338,16 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
         const dom = bg.querySelector('#bgDom').value;
         state.data.__budget_review_dom = dom;
         const key = 'cp_' + dom + '_review';
-        const block = buildSummary(b);
+        // If the budgeted services are identical to the last import for this
+        // client, record a one-line "no change" review instead of repeating them.
+        const svKey = (b.services || []).join('\n');
+        let block;
+        if (svKey && state.data.__budget_last === svKey) {
+          block = 'Budget reviewed ' + todayDMY() + ' — no change.';
+        } else {
+          block = buildSummary(b);
+          state.data.__budget_last = svKey;
+        }
         const curv = state.data[key] ? String(state.data[key]).trim() : '';
         state.data[key] = curv ? curv + '\n\n' + block : block;
         const el = document.querySelector('#careplanContent [data-key="' + key + '"]');
