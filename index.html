@@ -4497,6 +4497,28 @@ function renderSavedClients() {
   // annual review record has been created from it (by link or by same name) ----
   function _escDue(x) { return String(x == null ? '' : x).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
   const dueClients = computeDueClients(map);
+  // Quarterly budget review tracking (policy: budget reviewed every quarter;
+  // care plan updated when it changed). Flags clients whose last budget import
+  // was more than ~3 months ago.
+  const QUARTER = 92 * 24 * 3600 * 1000;
+  const qbDue = Object.values(map).filter(function(c) {
+    const at = c.state && c.state.data && c.state.data.__budget_last_at;
+    return at && (Date.now() - at) > QUARTER;
+  }).sort(function(a, b) { return (a.state.data.__budget_last_at || 0) - (b.state.data.__budget_last_at || 0); });
+  let qbHtml = '';
+  if (!q && qbDue.length) {
+    qbHtml = '<div style="background:#eef4fb;border:1px solid #7da7d9;border-radius:8px;padding:12px 14px;margin-bottom:14px">' +
+      '<h3 style="margin:0 0 4px;color:#2a4d79">🧾 Quarterly budget review due (' + qbDue.length + ')</h3>' +
+      '<small style="color:#4a6d99">Last budget import was over 3 months ago — run "Import package budget" on the Care Plan and update it if anything changed.</small>' +
+      qbDue.map(function(c) {
+        const d2 = (c.state && c.state.data) || {};
+        const days = Math.floor((Date.now() - c.state.data.__budget_last_at) / (24 * 3600 * 1000));
+        return '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid #d6e4f5;margin-top:6px">' +
+          '<div style="flex:1"><strong>' + _escDue(d2.p_name || d2.p_preferred || c.name || '(unnamed)') + '</strong> ' +
+          '<small style="color:#4a6d99">· last budget review ' + days + ' days ago</small></div>' +
+          '<button type="button" data-resume="' + c.id + '" style="background:#fff;border:1px solid #7da7d9;color:#2a4d79">Open →</button></div>';
+      }).join('') + '</div>';
+  }
   let dueHtml = '';
   if (!q && dueClients.length) {
     dueHtml = '<div style="background:#fff8e1;border:1px solid #d4a017;border-radius:8px;padding:12px 14px;margin-bottom:14px">' +
@@ -4544,7 +4566,7 @@ function renderSavedClients() {
   const heading = q
     ? '<h3>Resume a client (' + list.length + ' of ' + totalCount + ')</h3>'
     : '<h3>Resume a client (' + list.length + ')</h3>';
-  root.innerHTML = dueHtml + heading + list.map(c => {
+  root.innerHTML = dueHtml + qbHtml + heading + list.map(c => {
     // Prefer the actual participant name (state.data.p_name) over the default
     // "New Client · started ..." label. Fall back to preferred name, then cached label.
     const d = (c.state && c.state.data) || {};
@@ -5210,8 +5232,11 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
   }
 
   async function pdfToText(file) {
+    return pdfBufToText(await file.arrayBuffer());
+  }
+
+  async function pdfBufToText(buf) {
     await loadPdfJs();
-    const buf = await file.arrayBuffer();
     const doc = await window.pdfjsLib.getDocument({ data: buf }).promise;
     let out = '';
     for (let p = 1; p <= doc.numPages; p++) {
@@ -5286,6 +5311,42 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
     return out;
   }
 
+  /* ---- Method 0: find the latest Package Overview in the client's SharePoint folder ---- */
+  const SPB = { host: 'onedreamcommunity.sharepoint.com', sitePath: '/sites/AgedCareTeam622' };
+  let _spbDriveId = null;
+  async function spbDrive() {
+    if (!window.ODC_CLOUD || !ODC_CLOUD.graph) throw new Error('Cloud connection not ready — sign in first.');
+    if (!_spbDriveId) {
+      const site = await ODC_CLOUD.graph('/sites/' + SPB.host + ':' + SPB.sitePath);
+      const drive = await ODC_CLOUD.graph('/sites/' + site.id + '/drive');
+      _spbDriveId = drive.id;
+    }
+    return _spbDriveId;
+  }
+  async function spbFindBudgetPdfs() {
+    const driveId = await spbDrive();
+    const res = await ODC_CLOUD.graph('/drives/' + driveId + "/root/search(q='Package Overview')?$top=100&$select=id,name,lastModifiedDateTime,parentReference,webUrl,file");
+    const toks = (state.data.p_name || '').toLowerCase().split(/\s+/).filter(function(w) { return w.length > 2; });
+    return (res.value || [])
+      .filter(function(it) { return it.file && /\.pdf$/i.test(it.name || ''); })
+      .filter(function(it) {
+        if (!toks.length) return true;
+        let hay = '';
+        try { hay = decodeURIComponent(((it.parentReference && it.parentReference.path) || '') + ' ' + (it.webUrl || '')).toLowerCase(); }
+        catch (e) { hay = ((it.webUrl || '') + '').toLowerCase(); }
+        const hit = toks.filter(function(w) { return hay.indexOf(w) >= 0; }).length;
+        return hit >= Math.min(2, toks.length);
+      })
+      .sort(function(a, b) { return new Date(b.lastModifiedDateTime) - new Date(a.lastModifiedDateTime); });
+  }
+  async function spbFileText(itemId) {
+    const driveId = await spbDrive();
+    const token = await ODC_CLOUD.getToken();
+    const r = await fetch('https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + itemId + '/content', { headers: { 'Authorization': 'Bearer ' + token } });
+    if (!r.ok) throw new Error('Could not download the file (HTTP ' + r.status + ')');
+    return pdfBufToText(await r.arrayBuffer());
+  }
+
   function openModal() {
     let bg = document.getElementById('budgetImportBg');
     if (bg) bg.remove();
@@ -5298,6 +5359,7 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
     bg.innerHTML = '<div style="background:#fff;border-radius:8px;max-width:560px;width:92%;max-height:86vh;overflow-y:auto;padding:20px">' +
       '<h2 class="serif" style="margin:0 0 4px">Import <em>package budget</em></h2>' +
       '<p style="margin:0 0 12px;font-size:12.5px;color:var(--ink-muted)">From the CareTok <strong>Package Overview</strong>: choose the downloaded PDF, or copy the whole page (Ctrl+A, Ctrl+C) and paste below. The figures are appended to the Review / evaluation field you pick — nothing already written is removed.</p>' +
+      '<div style="margin-bottom:12px"><span style="font-size:11px;text-transform:uppercase;letter-spacing:.02em;color:var(--ink-muted);font-weight:600">Method 0 — SharePoint</span><br/><button type="button" class="mini-btn" id="bgSpFind" style="margin-top:4px">🔍 Find this client’s Package Overview on SharePoint</button><div id="bgSpList" style="margin-top:6px;max-height:150px;overflow-y:auto"></div></div>' +
       '<label class="field" style="display:block;margin-bottom:10px"><span>Method 1 — PDF file</span><input type="file" id="bgPdf" accept="application/pdf"/></label>' +
       '<label class="field" style="display:block;margin-bottom:10px"><span>Method 2 — or paste the page text</span><textarea id="bgPaste" rows="4" placeholder="Paste the Package Overview page here…"></textarea></label>' +
       '<label class="field" style="display:block;margin-bottom:14px"><span>Insert into the Review / evaluation field of</span><select id="bgDom">' +
@@ -5307,6 +5369,41 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
     document.body.appendChild(bg);
     bg.querySelector('#bgCancel').addEventListener('click', function() { bg.remove(); });
     bg.addEventListener('click', function(e) { if (e.target === bg) bg.remove(); });
+    bg.querySelector('#bgSpFind').addEventListener('click', async function() {
+      const fb = bg.querySelector('#bgSpFind');
+      const listEl = bg.querySelector('#bgSpList');
+      fb.disabled = true; fb.textContent = 'Searching SharePoint…';
+      try {
+        const items = await spbFindBudgetPdfs();
+        if (!items.length) {
+          listEl.innerHTML = '<div style="font-size:12px;color:var(--ink-muted);padding:6px 0">No "Package Overview" PDF found in this client’s folders — use Method 1 or 2 below.</div>';
+        } else {
+          listEl.innerHTML = items.slice(0, 8).map(function(it) {
+            let folder = '';
+            try { folder = decodeURIComponent(((it.parentReference && it.parentReference.path) || '').split('root:').pop() || ''); } catch (e) {}
+            return '<button type="button" data-spbid="' + it.id + '" style="display:block;width:100%;text-align:left;padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:#fff;cursor:pointer;margin-bottom:4px">' +
+              '<strong style="font-size:12.5px">' + it.name + '</strong><br/><small style="color:var(--ink-muted)">' + folder + ' · ' + new Date(it.lastModifiedDateTime).toLocaleDateString() + '</small></button>';
+          }).join('');
+        }
+      } catch (err) {
+        listEl.innerHTML = '<div style="font-size:12px;color:var(--warning);padding:6px 0">Search failed: ' + (err.message || err) + '</div>';
+      }
+      fb.disabled = false; fb.textContent = '🔍 Find this client’s Package Overview on SharePoint';
+      listEl.onclick = async function(e) {
+        const b2 = e.target.closest('[data-spbid]');
+        if (!b2) return;
+        b2.disabled = true; b2.style.opacity = .6;
+        try {
+          const text = await spbFileText(b2.dataset.spbid);
+          bg.querySelector('#bgPaste').value = text;
+          bg.querySelector('#bgGo').click();
+        } catch (err) {
+          alert('Could not read that PDF: ' + (err.message || err));
+          b2.disabled = false; b2.style.opacity = 1;
+        }
+      };
+    });
+
     bg.querySelector('#bgGo').addEventListener('click', async function() {
       const goBtn = bg.querySelector('#bgGo');
       goBtn.disabled = true; goBtn.textContent = 'Reading…';
@@ -5348,6 +5445,7 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
           block = buildSummary(b);
           state.data.__budget_last = svKey;
         }
+        state.data.__budget_last_at = Date.now();
         const curv = state.data[key] ? String(state.data[key]).trim() : '';
         state.data[key] = curv ? curv + '\n\n' + block : block;
         const el = document.querySelector('#careplanContent [data-key="' + key + '"]');
