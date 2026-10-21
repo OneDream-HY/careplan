@@ -18,7 +18,7 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v2.8 (20 Oct 2026)
+     APP VERSION: v2.8.2 (21 Oct 2026)
      Version history:
        v2.8 — MAC Support Plan import + care-plan draft generator: "📄 Import MAC
               Support Plan" reads a My Aged Care Support Plan (REP001 — HCP or
@@ -1166,7 +1166,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v2.8</span>
+    <span class="badge">Cloud · v2.8.2</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1180,7 +1180,7 @@ window.ODC_CLOUD = (function() {
     <div class="brand">
       <img id="topLogo" alt="One Dream Community" class="brand-logo"/>
       <span>One Dream Community</span>
-      <small id="modeLabel">CARE PLAN WORKFLOW · v2.8</small>
+      <small id="modeLabel">CARE PLAN WORKFLOW · v2.8.2</small>
     </div>
     <span class="mode-chip" id="modeChip" style="display:none">New Client</span>
     <span class="client-chip" id="clientChip" style="display:none">—</span>
@@ -5329,8 +5329,8 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
       let nm = sm[1].replace(/\s+/g, ' ').trim();
       if (nm.length > 90) continue;
       if (nm === nm.toUpperCase() && /FREQUENCY|DESCRIPTION|PROVIDER|RATE|PURCHASE/i.test(nm)) continue;
-      // Service + provider + frequency only (no dollar amounts, per staff preference)
-      b.services.push('\u2022 ' + nm + ' \u2014 ' + sm[3] + ' ' + sm[4]);
+      // Service + provider + frequency only (no units, no dollar amounts — per RN)
+      b.services.push('\u2022 ' + nm + ' \u2014 ' + sm[4]);
     }
     b.parsed = !!((b.services && b.services.length) || b.subsidyQ || b.qAvail || b.availMo);
     return b;
@@ -5985,10 +5985,10 @@ function _macDateMs(dmy) { const m = String(dmy || '').match(/(\d{1,2})\/(\d{1,2
 /* Budget lines saved by the v2.7 import ("• Service — units frequency") */
 function macBudgetLines(D) {
   return String((D && D.__budget_last) || '').split('\n').map(function (l) {
-    const m = l.match(/^[•\-\s]*(.+?)\s+[—\-]\s+(\S+)\s+(\w+)\s*$/);
+    const m = l.match(/^[•\-\s]*(.+?)\s+[—\-]\s+(?:(\d+(?:\.\d+)?)\s+)?(\w+)\s*$/);
     if (!m) return null;
     const wl = (window.ODC_BUDGET && ODC_BUDGET.domainsFor(m[1])) || [];
-    return { text: m[1].trim(), units: m[2], freq: m[3], domain: wl[0] || ODC_MAC_MAP.serviceDomain(m[1]), domains: wl.length ? wl : [ODC_MAC_MAP.serviceDomain(m[1])], line: l.replace(/^[•\s]+/, '') };
+    return { text: m[1].trim(), units: m[2] || '', freq: m[3], domain: wl[0] || ODC_MAC_MAP.serviceDomain(m[1]), domains: wl.length ? wl : [ODC_MAC_MAP.serviceDomain(m[1])], line: l.replace(/^[•\s]+/, '') };
   }).filter(Boolean);
 }
 
@@ -6202,8 +6202,8 @@ function macGenerateDraft(D, opts) {
   x.budget.forEach(function (bl) {
     (bl.domains || [bl.domain]).forEach(function (d) {
       const b = bucket(tgt(d));
-      b.tasks.push('• ' + bl.text + ' — ' + bl.units + ' ' + bl.freq + ' (package budget)' + (!bl.recommended && !bl.approved ? ' ⚠ not in Support Plan' : ''));
-      b.days.push(bl.text + ': ' + bl.units + ' ' + bl.freq);
+      b.tasks.push('• ' + bl.text + ' — ' + bl.freq + ' (package budget)' + (!bl.recommended && !bl.approved ? ' ⚠ not in Support Plan' : ''));
+      b.days.push(bl.text + ': ' + bl.freq);
     });
   });
   // 7. Approvals → aids / tasks
