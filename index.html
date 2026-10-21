@@ -18,8 +18,16 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v2.9 (21 Oct 2026)
+     APP VERSION: v3.0 (21 Oct 2026)
      Version history:
+       v3.0 — "📂 Import last year's forms": reads the ODC fillable PDF forms used
+              before this app (Care Plan v0.1, FRAT, Pain, Speech/Communication,
+              Mobility, Personal Hygiene, Comprehensive Health, Nutrition) from
+              the client's SharePoint folder or dropped-in files, recognises each
+              template by its AcroForm field names, maps the answers onto the
+              Initial/Annual Ax, the matching assessment blocks (switched on
+              automatically) and the Care Plan domains — fills empty fields only
+              and tags each one "LAST YEAR'S FORM — REVIEW" until edited.
        v2.9 — One-click PDF filing: with ODC_CLOUD_CONFIG.pdfService.url set, the
               "Save to client folder" dialog gets a "Create the PDF and save it"
               button. The app snapshots the page exactly as the Print Bundle
@@ -1197,7 +1205,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v2.9</span>
+    <span class="badge">Cloud · v3.0</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1657,7 +1665,10 @@ window.ODC_CLOUD = (function() {
       <div>
         <h1>Initial <em>Assessment</em> & Planning.</h1>
         <p>Comprehensive RN/Care Manager assessment across 19 domains. Identification, contacts, medical and care domains in one place — no duplicate entry. At the end, tick the formal scoring tools and individual assessments needed: selected items appear in <strong>Step 2</strong>.</p>
-        <button type="button" class="btn ghost no-print" id="btnImportOnboarding" style="margin-top:10px">⬇ Import from Onboarding form</button>
+        <div class="no-print" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+          <button type="button" class="btn ghost" id="btnImportOnboarding">⬇ Import from Onboarding form</button>
+          <button type="button" class="btn ghost" data-legacy-import>📂 Import last year’s forms (PDF)</button>
+        </div>
       </div>
       <div class="step-meta"><span class="big">01</span>Step One</div>
     </div>
@@ -1699,6 +1710,7 @@ window.ODC_CLOUD = (function() {
       <div>
         <h1>Annual <em>Assessment</em> & Planning.</h1>
         <p>For clients <strong>after 12 months</strong> of service who are <strong>low level / non-complex</strong>. This single bundled document replaces the full re-assessment. FRAT and Comprehensive Health/Medical Ax are done <em>separately</em> if missing from the file — toggle them on under <em>Adjuncts</em>.</p>
+        <button type="button" class="btn ghost no-print" data-legacy-import style="margin-top:10px">📂 Import last year’s forms (PDF)</button>
       </div>
       <div class="step-meta"><span class="big">01</span>Annual</div>
     </div>
@@ -1722,6 +1734,7 @@ window.ODC_CLOUD = (function() {
         <h1><em>Care</em> Plan.</h1>
         <p>Auto-generated from completed assessments. Edit any cell to refine. Identified risks and tool results from Step 2 are pre-filled below.</p>
         <div class="no-print" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+          <button type="button" class="btn ghost" data-legacy-import>📂 Import last year’s forms</button>
           <button type="button" class="btn ghost" id="btnImportMac">📄 Import MAC Support Plan</button>
           <button type="button" class="btn ghost" id="btnImportBudget">🧾 Import package budget (PDF / paste)</button>
           <button type="button" class="btn" id="btnMacDraft">✨ Generate care plan draft</button>
@@ -1771,7 +1784,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v2.9"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.0"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -5449,7 +5462,7 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
   }
 
   // Shared with the MAC Support Plan import (v2.8)
-  window.ODC_PDF = { pdfToText: pdfToText, pdfBufToText: pdfBufToText };
+  window.ODC_PDF = { pdfToText: pdfToText, pdfBufToText: pdfBufToText, loadPdfJs: loadPdfJs };
   window.ODC_SPB = { drive: spbDrive, fileText: spbFileText };
 
   function openModal() {
@@ -6436,6 +6449,520 @@ function macApplyDraftTags() {
     window.renderCarePlan = function () { const r = _origRender.apply(this, arguments); try { macApplyDraftTags(); } catch (e) { console.warn(e); } return r; };
     window.renderCarePlan.__macWrapped = true;
   }
+})();
+
+
+/* ---------- v3.0: Import last year's forms (ODC v0.1 MAY 2024 fillable PDFs) ----------
+   Before this app, assessments and care plans were written in the ODC fillable
+   PDF forms (Care Plan v0.1, FRAT, Pain, Speech/Communication/Hearing/Vision,
+   Mobility, Personal Hygiene, Comprehensive Health/Medical, Nutrition). Those
+   PDFs keep their answers in AcroForm fields, so they can be read exactly —
+   no OCR. This module reads one or more of them (from the client's SharePoint
+   folder or dropped in), recognises each template by its field names, maps the
+   fields onto this app's keys and fills whatever is still EMPTY. Every filled
+   field is tagged "Last year's form — review" until a staff member edits it.
+   Stored on the record: __legacy { files:[{name,template,date,count}], at, fill:{key:value} } */
+window.ODC_LEGACY = (function () {
+  /* ---- helpers ---- */
+  function s(v) { if (v == null) return ''; if (Array.isArray(v)) v = v[0]; v = String(v).replace(/\r/g, '\n').trim(); return /^(n\/?a|nil|none|-)$/i.test(v) ? '' : v; }
+  function raw(v) { if (v == null) return ''; if (Array.isArray(v)) v = v[0]; return String(v).replace(/\r/g, '\n').trim(); }
+  function dmy(v) { const m = String(v || '').match(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})/g); if (!m) return ''; const last = m[m.length - 1].match(/(\d{1,2})[./-](\d{1,2})[./-](\d{4})/); return ('0' + last[1]).slice(-2) + '/' + ('0' + last[2]).slice(-2) + '/' + last[3]; }
+  function iso(v) { const d = dmy(v); return d ? d.slice(6) + '-' + d.slice(3, 5) + '-' + d.slice(0, 2) : ''; }
+  function yn(v) { v = raw(v).toLowerCase(); if (/^(y|yes|true)/.test(v)) return 'Yes'; if (/^(n|no|false|nil)/.test(v)) return 'No'; return ''; }
+  function on(F, name) { const v = F[name]; return v === true || (typeof v === 'string' && v !== '' && v !== 'Off'); }
+  function pick(F, pairs) { for (const p of pairs) if (on(F, p[0])) return p[1]; return ''; }
+  function picks(F, pairs) { return pairs.filter(function (p) { return on(F, p[0]); }).map(function (p) { return p[1]; }); }
+  function ynbox(F, yes, no) { return on(F, yes) ? 'Yes' : (on(F, no) ? 'No' : ''); }
+  function num(v) { const m = raw(v).match(/-?\d+(?:\.\d+)?/); return m ? m[0] : ''; }
+  function opt(options, digit) { const d = num(digit); if (d === '') return ''; return options.find(function (o) { return o.indexOf(d + ' ') === 0; }) || ''; }
+  function lines(parts) { const seen = {}; return parts.filter(function (x) { if (!x || seen[x]) return false; seen[x] = 1; return true; }).join('\n'); }
+  function labelled(label, v) { v = s(v); return v ? label + ': ' + v : ''; }
+  function allergies(med, other) {
+    med = raw(med); other = raw(other);
+    if (!med && !other) return '';
+    const nka = function (x) { return !x || /^(nka|nil|none|n\/?a)$/i.test(x); };
+    if (nka(med) && nka(other)) return 'NKA';
+    return lines([med ? 'Medication: ' + med : '', other ? 'Other: ' + other : '']);
+  }
+
+  /* ---- read AcroForm values with pdf.js ---- */
+  async function readFields(buf) {
+    await window.ODC_PDF.loadPdfJs();
+    const doc = await window.pdfjsLib.getDocument({ data: buf }).promise;
+    const F = {}; let n = 0;
+    for (let p = 1; p <= doc.numPages; p++) {
+      const page = await doc.getPage(p);
+      const an = await page.getAnnotations();
+      an.forEach(function (a) {
+        if (a.subtype !== 'Widget' || !a.fieldName) return;
+        n++;
+        if (a.fieldType === 'Btn') { if (a.checkBox || a.radioButton) F[a.fieldName] = !!(a.fieldValue && a.fieldValue !== 'Off'); }
+        else F[a.fieldName] = Array.isArray(a.fieldValue) ? a.fieldValue[0] : (a.fieldValue == null ? '' : String(a.fieldValue));
+      });
+    }
+    return { fields: F, widgets: n, pages: doc.numPages };
+  }
+
+  /* ---- template recognition by field-name signature ---- */
+  const SIG = [
+    ['careplan', 'Care Plan (v0.1)', 'Text22.0.0.0.3.1.0.0'],
+    ['frat', 'FRAT', 'Text6.0.4.1.0.0'],
+    ['pain', 'Pain Assessment', 'Check Box6.8.0'],
+    ['communication', 'Speech / Communication / Hearing / Vision Ax', 'Text14.1.1.4.1.0'],
+    ['mobility', 'Mobility Assessment', 'Check Box3.1.1.0.4.2.1.1.0'],
+    ['hygiene', 'Personal Hygiene Assessment', 'Check Box2.2.0.0.1.1.1.1.1'],
+    ['comprehensive', 'Comprehensive Health / Medical Ax', 'Text3.6.5.1.2.0.1.1.2.1.2'],
+    ['nutrition', 'Nutrition Assessment', 'Check Box17.1.2.1']
+  ];
+  function detect(F) { for (const t of SIG) if (t[2] in F) return { id: t[0], label: t[1] }; return null; }
+
+  /* ---- mappers: each returns { set:{key:value}, add:{key:[values]}, append:{key:text}, tools:[...], date, client } ---- */
+  const CP_DOMS = [
+    ['nutrition', function (c) { return 'Text2.0.0.' + c + '.0.0'; }],
+    ['hygiene', function (c) { return 'Text2.0.0.' + c + '.0.1'; }],
+    ['mobility', function (c) { return 'Text2.0.0.' + c + '.1.0'; }],
+    ['continence', function (c) { return 'Text2.0.0.' + c + '.1.1'; }]
+  ];
+  const CP_COLS = { 1: 'needs', 2: 'goals', 3: 'intervention', 4: 'tasks', 5: 'days', 6: 'review' };
+  const CP_T22 = { behaviour: '3.1.0.0', cognition: '3.1.0.1', skin: '3.1.2.1.0.0', medication: '3.1.2.1.0.1', pain: '3.1.2.1.0.2', diabetes: '3.1.2.1.0.3', home: '3.1.2.1.3.1.0.0.0', social: '3.1.2.1.3.1.0.0.1', _transport: '3.1.2.1.3.1.0.0.2', _emergency: '3.1.2.1.3.1.0.0.4' };
+  const T22 = { needs: 'Text22.0.0.0.', goals: 'Text22.0.1.0.', intervention: 'Text22.0.0.1.', tasks: 'Text22.0.1.1.0.', days: 'Text22.0.1.1.1.', review: 'Text22.0.1.1.2.' };
+
+  function mapCarePlan(F) {
+    const set = {}, add = {}, append = {};
+    set.p_name = s(F['Text1.0.0.0']); set.p_dob = iso(F['Text1.0.0.1']); set.p_phone = s(F['Text1.1.0']); set.p_email = s(F['Text1.1.1']);
+    const g = s(F['Text1.2.1']); set.p_gender = /^f/i.test(g) ? 'Female' : (/^m/i.test(g) ? 'Male' : '');
+    const lv = num(F['Text1.2.0']); if (lv) add.p_funding = ['Transitioned Level ' + lv];
+    set.p_mac_id = s(F['Text3.0']); set.p_address = s(F['Text3.1']);
+    set.gp_name = s(F['Text8.0.0']); set.gp_phone = s(F['Text8.0.1']); set.hospital = s(F['Text8.1.0']);
+    // Representative rows: 0 advocate, 1 POA/SDM, 2 representative
+    const reps = [0, 1, 2].filter(function (i) { return yn(F['Dropdown5.' + i]) === 'Yes' && s(F['Text6.' + i]); });
+    const noks = [];
+    reps.forEach(function (i) { const t = s(F['Text6.' + i]); const ph = (t.match(/\(?(0\d[\d ]{7,}\d)\)?/) || [])[1] || ''; noks.push({ name: t.replace(/\(?0\d[\d ]{7,}\d\)?/, '').trim(), phone: ph.trim(), rel: s(F['Text7.' + i]), epoa: i === 1 }); });
+    [0, 1].forEach(function (r) { const nm = s(F['Text9.' + r + '.1']); if (nm && !noks.some(function (n) { return n.name === nm; })) noks.push({ name: nm, phone: s(F['Text9.' + r + '.2']), rel: s(F['Text9.' + r + '.0']) }); });
+    if (noks[0]) { set.nok1_name = noks[0].name; set.nok1_phone = noks[0].phone; set.nok1_rel = noks[0].rel; if (noks[0].epoa) set.nok1_epoa = 'Yes'; }
+    if (noks[1]) { set.nok2_name = noks[1].name; set.nok2_phone = noks[1].phone; set.nok2_rel = noks[1].rel; }
+    set.acd_have = yn(F['Dropdown5.3']); set.cp_eol_have = yn(F['Dropdown5.4']);
+    set.med_diagnosis = s(F['Text11.3.1']);
+    set.med_allergies = allergies(F['Text4.0'], F['Text4.1']);
+    append.p_background = lines([labelled("Client's preference and choice", F['Text11.3.0']), labelled('Pets', F['Text11.1']), labelled('EoL care', F['Text6.4'])]);
+    const comm = lines([labelled('Communication', F['Text10.0']), labelled('Speech', F['Text10.1']), labelled('Vision', F['Text10.2']), labelled('Hearing', F['Text10.3']), labelled('General', F['Text10.4'])]);
+    set.an_comm_notes = comm; set.cp_communication_needs = comm;
+    const risk = s(F['Text12']), action = s(F['Text14']);
+    if (risk || action) set.__risk0 = { risk: risk, action: action };
+    CP_DOMS.forEach(function (d) { Object.keys(CP_COLS).forEach(function (c) { const v = s(F[d[1](c)]); if (v) set['cp_' + d[0] + '_' + CP_COLS[c]] = v; }); });
+    Object.keys(CP_T22).forEach(function (dom) {
+      const sfx = CP_T22[dom];
+      Object.keys(T22).forEach(function (col) {
+        const v = s(F[T22[col] + sfx]); if (!v) return;
+        if (dom === '_transport') { const k = 'cp_social_' + col; append[k] = lines([append[k], 'Transport — ' + v]); }
+        else if (dom === '_emergency') { if (col === 'needs' || col === 'intervention' || col === 'goals') append.cp_peep_evac = lines([append.cp_peep_evac, v]); }
+        else set['cp_' + dom + '_' + col] = v;
+      });
+    });
+    const planDate = dmy(F['Text17.0.0.0']) || dmy(F['Text2.0.0.0.0.0']);
+    return { set: set, add: add, append: append, tools: [], date: planDate, client: { name: set.p_name, dob: dmy(F['Text1.0.0.1']) } };
+  }
+
+  function mapFrat(F) {
+    const set = {};
+    let c = -1, best = 0;
+    for (let i = 0; i < 6; i++) { const d = dmy(F['Text3.0.' + i + '.1']); if (!d) continue; const t = new Date(d.slice(6), d.slice(3, 5) - 1, d.slice(0, 2)).getTime(); if (t >= best) { best = t; c = i; } }
+    if (c < 0) for (let i = 5; i >= 0; i--) if (num(F['Text6.' + i + '.4.0'])) { c = i; break; }
+    if (c < 0) c = 0;
+    const O = ODC_LEGACY_OPTS;
+    set.frat_date = dmy(F['Text3.0.' + c + '.1']);
+    set.frat_falls_hx = opt(O.frat_falls_hx, F['Text3.0.' + c + '.0']); set.frat_balance = opt(O.frat_balance, F['Text3.1.' + c]);
+    set.frat_mental = opt(O.frat_mental, F['Text5.0.' + c + '.0.0']); set.frat_general = opt(O.frat_general, F['Text5.0.' + c + '.1']);
+    set.frat_vision = opt(O.frat_vision, F['Text5.0.' + c + '.2']); set.frat_hearing = opt(O.frat_hearing, F['Text5.0.' + c + '.3']);
+    set.frat_speech = opt(O.frat_speech, F['Text5.0.' + c + '.4']); set.frat_meds = opt(O.frat_meds, F['Text5.0.' + c + '.5']);
+    set.frat_age = opt(O.frat_age, F['Text5.0.' + c + '.6.0']); set.frat_chronic = opt(O.frat_chronic, F['Text5.0.' + c + '.6.1']);
+    set.frat_inc = opt(O.frat_inc, F['Text6.' + c + '.0.0']); set.frat_foot = opt(O.frat_foot, F['Text6.' + c + '.1']);
+    set.frat_drug = opt(O.frat_drug, F['Text6.' + c + '.2']); set.frat_env = opt(O.frat_env, F['Text6.' + c + '.3']);
+    set.frat_total = num(F['Text6.' + c + '.4.0']);
+    const rc = raw(F['Dropdown4.' + c]).toUpperCase(); set.frat_risk = rc === 'L' ? 'Low' : rc === 'M' ? 'Moderate' : rc === 'H' ? 'High' : '';
+    set.frat_rn = s(F['Text6.0.4.1.0.' + c]);
+    const hist = [];
+    for (let r = 0; r < 6; r++) { const d = dmy(F['Text2.0.0.' + r]), t = s(F['Text2.1.0.' + r]); if (d || t) hist.push((d ? d + ' — ' : '') + t); }
+    set.frat_history = hist.join('\n');
+    return { set: set, add: {}, append: {}, tools: ['frat'], date: set.frat_date, client: { name: s(F['Text1.0']), dob: dmy(F['Text1.1']) } };
+  }
+
+  function mapPain(F) {
+    const set = {}, add = {}, append = {};
+    const sev = ['No Pain', 'Mild', 'Moderate', 'Severe'];
+    set.pain_today = lines([on(F, 'Check Box3.0.0') ? 'Yes' : (on(F, 'Check Box3.1.0') ? 'No' : ''), on(F, 'Check Box3.0.1') ? 'Monitored: verbal' : (on(F, 'Check Box3.1.1') ? 'Monitored: non-verbal' : '')]);
+    set.pain_worst = pick(F, sev.map(function (v, i) { return ['Check Box4.0.' + i, v]; }));
+    set.pain_avg = pick(F, [['Check Box4.1.0.0', 'No Pain'], ['Check Box4.1.1', 'Mild'], ['Check Box4.1.2', 'Moderate'], ['Check Box4.1.3', 'Severe']]);
+    set.pain_relief = pick(F, [['Check Box6.3.0.0.1', 'No Relief'], ['Check Box6.3.1.0.1', 'Eased'], ['Check Box6.3.2.0.1', 'Complete Relief']]);
+    add.pain_type = picks(F, [['Check Box4.1.0.1.0.0', 'Dull'], ['Check Box4.1.0.1.0.1', 'Aching'], ['Check Box4.1.0.1.0.2', 'Throbbing'], ['Check Box4.1.0.1.0.3', 'Burning'], ['Check Box4.1.0.1.0.4', 'Tingling'], ['Check Box4.1.0.1.0.5', 'Numbness'], ['Check Box4.1.0.1.0.6', 'Sharp'], ['Check Box4.1.0.1.1.0', 'Shooting'], ['Check Box4.1.0.1.1.1', 'Stabbing']]);
+    set.pain_treatment = lines([s(F['Text3']), labelled('Comments', F['Text2.1'])]);
+    const lv = ['Does not interfere', 'Mildly', 'Moderately', 'Completely'];
+    function inter(key, names) { const v = pick(F, names.map(function (n, i) { return [n, lv[i]]; })); if (v) set[key] = v; }
+    inter('pain_int_General_activity', ['Check Box6.3.0.0.0', 'Check Box6.3.1.0.0', 'Check Box6.3.2.0.0', 'Check Box6.3.3.0']);
+    inter('pain_int_Mood', ['Check Box6.3.0.1', 'Check Box6.3.1.1', 'Check Box6.3.2.1', 'Check Box6.3.3.1']);
+    inter('pain_int_Walking', ['Check Box6.3.0.2', 'Check Box6.3.1.2', 'Check Box6.3.2.2', 'Check Box6.3.3.2']);
+    inter('pain_int_Normal_work', ['Check Box6.3.0.3', 'Check Box6.3.1.3', 'Check Box6.3.2.3', 'Check Box6.3.3.3']);
+    inter('pain_int_Relations_with_others', ['Check Box6.4.0', 'Check Box6.4.1', 'Check Box6.4.2', 'Check Box6.4.3']);
+    inter('pain_int_Sleep', ['Check Box6.5.0', 'Check Box6.5.1', 'Check Box6.5.2', 'Check Box6.5.3']);
+    inter('pain_int_Enjoyment', ['Check Box6.6.0', 'Check Box6.6.1', 'Check Box6.6.2', 'Check Box6.6.3']);
+    inter('pain_int_Concentration', ['Check Box6.7.0', 'Check Box6.7.1', 'Check Box6.7.2', 'Check Box6.7.3']);
+    inter('pain_int_Appetite', ['Check Box6.8.0', 'Check Box6.8.1', 'Check Box6.8.2', 'Check Box6.8.3']);
+    set.pain_strategies = s(F['Text7']); set.pain_rn = s(F['Text8.0']); set.pain_date = dmy(F['Text8.1']);
+    set.cp_pain_needs = labelled("Client's preference and choice", F['Text2.0.1']);
+    set.med_diagnosis = s(F['Text2.0.0']); set.med_allergies = allergies(F['Text6.0'], F['Text6.1']);
+    return { set: set, add: add, append: append, tools: ['pain'], date: set.pain_date, client: { name: (s(F['Text1.0.1']) + ' ' + s(F['Text1.0.0'])).trim(), dob: dmy(F['Text1.1.0']) } };
+  }
+
+  function mapCommunication(F) {
+    const set = {}, add = {}, append = {};
+    set.co_cog_required = on(F, 'Check Box5.0') ? 'Yes' : (on(F, 'Check Box5.1') ? 'Not required' : '');
+    set.co_cog_score = lines([s(F['Text6']), labelled('Reason', F['Text3'])]);
+    set.co_speech_dx = s(F['Text7.0']); set.co_languages = s(F['Text7.1']);
+    set.co_interpreter = yn(F['Text7.2.0']); set.co_interpreter_lang = s(F['Text7.2.1']) || (set.co_interpreter === 'Yes' ? set.co_languages : '');
+    set.co_speech_deficit = s(F['Text7.3']); set.co_dysphasia = yn(F['Text7.4']); set.co_dysarthria = yn(F['Text7.5']);
+    add.co_method = picks(F, [['Check Box9', 'Single words'], ['Check Box10.0', 'Clearly spoken words'], ['Check Box10.1', 'Slurred words'], ['Check Box10.2', 'Aids required'], ['Check Box12.0', 'Muttering / mumbling'], ['Check Box12.1', 'Sounds other than words'], ['Check Box12.2', 'Eye contact / smiles / frowns'], ['Check Box12.3', 'Eye contact / smiles / frowns'], ['Check Box12.4', 'Eye contact / smiles / frowns'], ['Check Box12.5', 'Body movement / hands'], ['Check Box12.6', 'Body movement / hands'], ['Check Box12.7', 'Body movement / hands'], ['Check Box12.8', 'Eye movement'], ['Check Box12.9', 'Animates']]);
+    add.co_method = add.co_method.filter(function (v, i, a) { return a.indexOf(v) === i; });
+    set.co_repeat = on(F, 'Check Box13.0') ? 'Yes' : ''; set.co_simple = on(F, 'Check Box13.1') ? 'Yes' : ''; set.co_eye = on(F, 'Check Box13.2') ? 'Yes' : '';
+    set.co_join = on(F, 'Check Box15.0') ? 'Yes' : yn(F['Text14.1.1.0']); set.co_appropriate = on(F, 'Check Box15.1') ? 'Yes' : yn(F['Text14.1.1.1']);
+    set.co_time_understand = on(F, 'Check Box15.2') ? 'Yes' : yn(F['Text14.1.1.2']); set.co_time_answer = on(F, 'Check Box15.3') ? 'Yes' : yn(F['Text14.1.1.3']);
+    set.co_hearing_deficit = on(F, 'Check Box16.0') ? 'Yes' : (/no issue|nil|none/i.test(raw(F['Text14.1.1.4.1.0'])) ? 'No' : '');
+    set.co_hearing_detail = lines([s(F['Text14.1.1.4.1.0']), s(F['Text14.1.1.4.1.1']), labelled('Aids / service', F['Text14.1.1.4.1.3']), s(F['Text14.1.1.4.1.4']), s(F['Text14.1.1.4.1.5'])]);
+    set.co_glasses = on(F, 'Check Box19.0') ? 'Yes' : (on(F, 'Check Box19.1') ? 'No' : '');
+    set.co_glasses_type = on(F, 'Check Box20') ? 'Reading' : (on(F, 'Check Box21') ? 'At all times' : '');
+    set.co_optometrist = s(F['Text25.2.0']); set.co_decline = on(F, 'Check Box19.2') ? 'Yes' : ''; set.co_specialist = on(F, 'Check Box19.3') ? 'Yes' : '';
+    set.co_blind = on(F, 'Check Box26.0') ? 'Yes' : '';
+    add.co_identify = picks(F, [['Check Box22.0', 'Hairbrush'], ['Check Box22.1', 'Chair'], ['Check Box22.2', 'Button'], ['Check Box22.3.0', 'Hair clips'], ['Check Box22.3.1', 'Table'], ['Check Box22.4', 'Bed'], ['Check Box23.0', 'Saltshaker'], ['Check Box23.1', 'Cup/glass'], ['Check Box24.0', 'Red'], ['Check Box24.1.0', 'Blue'], ['Check Box24.1.1', 'Yellow']]);
+    set.communication_rn = s(F['Text10.0']); set.communication_date = dmy(F['Text10.1']);
+    set.p_language = set.co_languages; if (set.co_interpreter) set.p_interpreter = set.co_interpreter;
+    set.med_diagnosis = s(F['Text2.0']); set.med_allergies = allergies(F['Text4.0'], F['Text4.1']);
+    append.cp_communication_needs = labelled("Client's preference and choice", F['Text2.1']);
+    return { set: set, add: add, append: append, tools: ['communication'], date: set.communication_date, client: { name: s(F['Text1.0']), dob: dmy(F['Text1.1']) } };
+  }
+
+  function mapMobility(F) {
+    const set = {}, add = {}, append = {};
+    add.mob_aids = picks(F, [['Check Box3.0.0', 'None'], ['Check Box3.0.1', 'Walker'], ['Check Box3.0.2', 'Hoist'], ['Check Box3.0.3', 'Wheelchair'], ['Check Box3.0.4', 'Walking stick'], ['Check Box3.1.0', 'Other']]);
+    set.mob_assist = pick(F, [['Check Box3.1.4.0.0', 'Wheelchair bound'], ['Check Box3.1.3.0.0', 'Two people'], ['Check Box3.1.2.0.0.0', 'One person'], ['Check Box3.1.1.0.0.0', 'No / supervision'], ['Check Box3.1.1.1', 'Bed bound']]);
+    set.mob_transfer = pick(F, [['Check Box3.1.3.0.1', 'Two people'], ['Check Box3.1.2.0.0.1', 'One person'], ['Check Box3.1.1.0.0.1', 'No / supervision']]);
+    add.mob_equip = picks(F, [['Check Box3.1.1.0.1', 'Rails'], ['Check Box3.1.2.0.1', 'Electric bed'], ['Check Box3.1.3.1', 'Grab stick'], ['Check Box3.1.4.1', 'Chairlift']]);
+    if (s(F['Text7.1.0'])) add.mob_equip.push('Hoist / lifter'); if (s(F['Text7.1.1.0'])) add.mob_equip.push('Other');
+    set.mob_equip_req = ynbox(F, 'Check Box3.1.1.0.2', 'Check Box3.1.2.0.2'); set.mob_equip_detail = lines([s(F['Text7.1.1.1.0']), s(F['Text7.0.0']), s(F['Text7.1.0']), s(F['Text7.1.1.0'])]);
+    set.mob_stairs = ynbox(F, 'Check Box3.1.3.2.0', 'Check Box3.1.4.2.0'); set.mob_cars = ynbox(F, 'Check Box3.1.3.2.1', 'Check Box3.1.4.2.1');
+    set.mob_exercise = pick(F, [['Check Box3.1.2.0.3', 'Walking'], ['Check Box3.1.1.0.3', 'Gym'], ['Check Box3.1.3.3', 'Other'], ['Check Box3.1.4.3', 'None']]);
+    set.mob_freq = pick(F, [['Check Box3.1.2.0.4', 'Daily'], ['Check Box3.1.3.4', 'Weekly'], ['Check Box3.1.4.4', 'None']]);
+    add.mob_referrals = picks(F, [['Check Box3.1.1.0.4.0', 'Occupational therapist'], ['Check Box3.1.1.0.4.1.0', 'Physiotherapist'], ['Check Box3.1.1.0.4.2.0', 'Other']]);
+    set.mob_falls_risk = ynbox(F, 'Check Box3.1.1.0.4.1.1.0', 'Check Box3.1.1.0.4.2.1.0');
+    set.mob_falls12m = on(F, 'Check Box3.1.1.0.4.2.1.1.0') ? 'Yes — see FRAT' : (on(F, 'Check Box3.1.1.0.4.2.1.1.1') ? 'No' : '');
+    set.mob_med_review = pick(F, [['Check Box4.0.0', 'GP'], ['Check Box4.1.0', 'Ambulance called'], ['Check Box4.2', 'Hospital admission'], ['Check Box4.3', 'None']]);
+    set.mob_injuries = ynbox(F, 'Check Box4.0.1', 'Check Box4.1.1');
+    set.mobility_rn = s(F['Text5.0']); set.mobility_date = dmy(F['Text5.1']);
+    set.med_diagnosis = s(F['Text2.0']); set.med_allergies = allergies(F['Text3.0.0'], F['Text3.0.1']);
+    append.cp_mobility_needs = lines([labelled("Client's preference and choice", F['Text2.1']), labelled('Mobilising', F['Text7.0.1.0.0']), labelled('Transferring', F['Text7.0.1.0.1']), labelled('Stairs', F['Text7.1.1.1.1.0']), labelled('Cars', F['Text7.1.1.1.1.1']), labelled('Exercise', lines([s(F['Text7.1.1.2']), s(F['Text7.1.1.3'])])), labelled('Referral', F['Text7.1.1.4']), labelled('Injuries', F['Text8'])]);
+    return { set: set, add: add, append: append, tools: ['mobility'], date: set.mobility_date, client: { name: s(F['Text1.0']), dob: dmy(F['Text1.1']) } };
+  }
+
+  function mapHygiene(F) {
+    const set = {}, add = {}, append = {};
+    set.hyg_personal = pick(F, [['Check Box2.0.0', 'Independent'], ['Check Box2.0.1', 'Some Assistance'], ['Check Box2.0.2', 'Supervision'], ['Check Box2.0.3', 'Full Assistance']]);
+    set.hyg_support = pick(F, [['Check Box2.1.3', 'Both'], ['Check Box2.1.1', 'Support worker'], ['Check Box2.1.0', 'Family']]);
+    add.hyg_areas = picks(F, [['Check Box2.2.0.0.0', 'Dressing'], ['Check Box2.2.1.0.0', 'Undressing'], ['Check Box2.2.2.0', 'Showering'], ['Check Box2.1.2.0', 'Drying'], ['Check Box2.2.3.0.0', 'Washing hair'], ['Check Box2.2.3.0.1', 'Drying hair'], ['Check Box2.2.0.1', 'Shaving'], ['Check Box2.2.1.1', 'Other']]);
+    set.hyg_shower_freq = lines([s(F['Text1.1.1.1']), s(F['Text1.1.1.0.0'])]).replace(/\n/g, ' / ');
+    set.hyg_sponge_freq = s(F['Text1.1.1.2']); set.hyg_trolley_freq = s(F['Text1.1.1.3']); set.hyg_pref = s(F['Text1.1.1.4.0.0']);
+    add.hyg_equip = picks(F, [['Check Box2.2.0.0.1.0', 'Shower chair'], ['Check Box2.2.1.0.1.0', 'Toilet frame'], ['Check Box2.2.2.1.0', 'Commode chair'], ['Check Box2.1.2.1.0', 'Other']]);
+    add.hyg_dentures = picks(F, [['Check Box2.2.0.0.1.1.0', 'Full upper'], ['Check Box2.2.1.0.1.1.0', 'Full lower'], ['Check Box2.2.2.1.1.0', 'Partial upper'], ['Check Box2.1.2.1.1.0.0', 'Partial lower'], ['Check Box2.1.2.1.1.1.0', 'No']]);
+    add.hyg_own_teeth = picks(F, [['Check Box2.2.0.0.1.1.1.0', 'Full upper'], ['Check Box2.2.1.0.1.1.1.0', 'Full lower'], ['Check Box2.2.2.1.1.1.0', 'Partial upper'], ['Check Box2.1.2.1.1.0.1.0', 'Partial lower'], ['Check Box2.1.2.1.1.1.1.0', 'No']]);
+    set.hyg_oral_level = pick(F, [['Check Box2.2.0.0.1.1.1.1.0', 'Independent'], ['Check Box2.2.1.0.1.1.1.1.0', 'Supervision'], ['Check Box2.2.2.1.1.1.1.0', 'Some Assistance'], ['Check Box2.1.2.1.1.0.1.1', 'Full Assistance']]);
+    add.hyg_brush = picks(F, [['Check Box4.0.0', 'Manual'], ['Check Box4.0.1', 'Electric'], ['Check Box4.0.2', 'Ordinary toothpaste'], ['Check Box4.1.0', 'Specific toothpaste']]);
+    set.hygiene_rn = s(F['Text1.1.1.4.0.1.0']); set.hygiene_date = dmy(F['Text1.1.1.4.0.1.1']);
+    set.med_diagnosis = s(F['Text1.1.0.0']); set.med_allergies = allergies(F['Text1.1.0.1.0'], F['Text1.1.0.1.1']);
+    append.cp_hygiene_needs = lines([labelled("Client's preference and choice", F['Text1.1.0.2']), labelled('Other area', F['Text1.1.1.0.1']), labelled('Other equipment', F['Text1.1.1.4.1']), labelled('Toothpaste', F['Text5'])]);
+    return { set: set, add: add, append: append, tools: ['hygiene'], date: set.hygiene_date, client: { name: s(F['Text1.0.0']), dob: dmy(F['Text1.0.1']) } };
+  }
+
+  function mapNutrition(F) {
+    const set = {}, add = {}, append = {};
+    set.nu_weight = num(F['Text1.1.0.0.0']); set.nu_height = num(F['Text1.1.0.0.1']); set.nu_bmi = num(F['Text1.1.1']);
+    set.an_weight = set.nu_weight; set.an_height = set.nu_height; set.an_bmi = set.nu_bmi;
+    set.med_diagnosis = s(F['Text1.1.0.1.0.0']); set.med_allergies = allergies(F['Text1.1.0.1.0.1.0'], F['Text1.1.0.1.0.1.1']);
+    const caps = [];
+    if (/yes|able|independ/i.test(raw(F['Text2.2'])) && !/not|unable/i.test(raw(F['Text2.2']))) caps.push('Can prepare light meals');
+    if (/^y/i.test(raw(F['Text2.3']))) caps.push('Uses meal delivery');
+    if (/able|yes/i.test(raw(F['Text2.4'])) && !/not|unable/i.test(raw(F['Text2.4']))) caps.push('Can heat meals');
+    if (/requires|needs|assist/i.test(raw(F['Text2.5.0'])) && !/able to/i.test(raw(F['Text2.5.0']))) caps.push('Requires assistance heating');
+    if (/requires|needs|assist/i.test(raw(F['Text2.5.1.0'])) || /requires|needs|assist/i.test(raw(F['Text2.1']))) caps.push('Requires meal prep assistance');
+    add.nu_caps = caps;
+    set.nu_diet = pick(F, [['Check Box5.0.1.0', 'Normal chew'], ['Check Box5.0.1.1', 'Soft cut-up'], ['Check Box5.0.1.2', 'Minced moist'], ['Check Box5.0.1.3', 'Puree']]);
+    set.nu_fluid = pick(F, [['Check Box5.0.0', 'Thin'], ['Check Box5.1', 'Mildly thickened'], ['Check Box5.2', 'Moderately thickened'], ['Check Box5.3', 'Extremely thickened']]);
+    set.nu_dietary = lines([on(F, 'Check Box6.0.0') ? s(F['Text7']) || 'Yes' : '', s(F['Text14'])]);
+    set.nu_meal_size = pick(F, [['Check Box6.0.1.0.0', 'Small'], ['Check Box6.0.1.0.1', 'Medium'], ['Check Box6.0.1.0.2', 'Large']]);
+    set.nu_appetite = pick(F, [['Check Box6.0.1.1.0', 'Eats irregularly'], ['Check Box6.0.1.1.1', 'Eats regularly'], ['Check Box6.0.1.1.2.0', 'Eats small meals'], ['Check Box6.0.1.1.2.1', 'Eats substantial meals']]);
+    set.nu_weight_change = on(F, 'Check Box9.0') ? 'Yes — complete MNA' : (on(F, 'Check Box9.1') ? 'No' : '');
+    add.nu_loss_cause = picks(F, [['Check Box10.0.0', 'Ill-fitting dentures'], ['Check Box10.2.2', 'Oral / teeth issues'], ['Check Box10.0.1', 'Medications'], ['Check Box10.0.2', 'Palliative care'], ['Check Box10.1.0', 'Physical / mental health'], ['Check Box10.1.1', 'Swallowing']]);
+    set.nu_dietitian = ynbox(F, 'Check Box13.0.0.0', 'Check Box13.1.0.0'); set.nu_speech = ynbox(F, 'Check Box13.0.0.1', 'Check Box13.1.0.1'); set.nu_supplement = ynbox(F, 'Check Box13.0.1.1', 'Check Box13.1.1.1');
+    set.nu_enteral = ynbox(F, 'Check Box13.0.1.0', 'Check Box13.1.1.0');
+    set.nu_enteral_type = pick(F, [['Check Box17.0.0', 'PEG'], ['Check Box17.0.1', 'NG Tube'], ['Check Box17.0.2', 'Other']]);
+    set.nu_enteral_mode = pick(F, [['Check Box17.1.0.0', 'Bolus'], ['Check Box17.1.2.0', 'Continuous']]);
+    set.nu_enteral_fluid = s(F['Text16.3.0']); set.nu_enteral_name = lines([s(F['Text16.3.1']), s(F['Text16.0']), s(F['Text16.2'])]); set.nu_tube_changed = dmy(F['Text16.3.2.1']);
+    set.nutrition_rn = s(F['Text19.0.0']); set.nutrition_date = dmy(F['Text19.1.0']);
+    append.cp_nutrition_needs = lines([labelled("Client's preference and choice", F['Text2.0']), labelled('Meal prep', F['Text2.1']), labelled('Light meals', F['Text2.2']), labelled('Meal delivery', F['Text2.3']), labelled('Heating meals', lines([s(F['Text2.4']), s(F['Text2.5.0'])])), labelled('Other', F['Text2.5.1.1'])]);
+    const sup = [['Text3.0.0', 'Text3.0.1.0'], ['Text3.1.0', 'Text3.0.1.1']].map(function (p) { const a = s(F[p[0]]), b = s(F[p[1]]); return a || b ? (a || 'Support') + (b ? ' \u2014 ' + b : '') : ''; }).filter(Boolean).join('\n');
+    if (sup) append.an_nutrition_notes = sup;
+    return { set: set, add: add, append: append, tools: ['nutrition'], date: set.nutrition_date, client: { name: s(F['Text1.0.0']), dob: dmy(F['Text1.0.1']) } };
+  }
+
+  function mapComprehensive(F) {
+    const set = {}, add = {}, append = {};
+    set.ch_lang = s(F['Text6.0']); set.ch_interpreter = yn(F['Text6.1']); set.ch_devices = s(F['Text6.2']);
+    set.ch_consult_with = lines([picks(F, [['Check Box5.0', 'Client'], ['Check Box5.1.0', 'Family'], ['Check Box5.2.0', 'Other']]).join(', '), s(F['Text7.0.0']), labelled('Relationship', F['Text7.0.1']), labelled('Attended', F['Text7.1'])]);
+    set.nok1_name = s(F['Text7.2.1']).replace(/\s*-\s*\w+$/, '').trim(); const rel = (raw(F['Text7.2.1']).match(/-\s*(\w+)\s*$/) || [])[1]; if (rel) set.nok1_rel = rel;
+    set.nok1_phone = s(F['Text7.3']); set.gp_name = s(F['Text7.4.0']); set.gp_phone = s(F['Text7.4.1']); set.ch_specialist = s(F['Text7.4.2']);
+    set.ch_cv = ynbox(F, 'Check Box9.0.0', 'Check Box9.0.1'); set.ch_cv_specify = lines([s(F['Text8.0.0']), s(F['Text8.0.1'])]);
+    set.ch_lips = s(F['Text3.1']); set.ch_limbs = lines([labelled('Colour', F['Text3.2']), labelled('Temperature', F['Text3.3'])]).replace(/\n/g, ' · '); set.ch_skin = s(F['Text3.4']);
+    set.ch_oedema = lines([s(F['Text3.5']), labelled('Location', F['Text3.6.0']), labelled('Severity', F['Text3.6.1']), labelled('Stockings / elevation', F['Text3.6.2']), labelled('Capillary refill', F['Text3.6.3']), labelled('Numbness / tingling', F['Text3.6.4']), labelled('Varicose veins', F['Text3.6.5.0'])]);
+    set.ch_resp = ynbox(F, 'Check Box9.1.0.0', 'Check Box9.1.1.0'); set.ch_resp_specify = s(F['Text3.6.5.1.0']);
+    set.ch_sob = ynbox(F, 'Check Box9.1.0.1', 'Check Box9.1.1.1'); set.ch_breath_diff = ynbox(F, 'Check Box9.1.0.2.0', 'Check Box9.1.1.2.0');
+    set.ch_resp_char = [s(F['Text3.6.5.1.2.1.0']), s(F['Text3.6.5.1.2.1.1']), s(F['Text3.6.5.1.2.1.2'])].filter(Boolean).join(' / ');
+    set.ch_chest = s(F['Text3.6.5.1.2.0.1.0']); set.ch_cough = ynbox(F, 'Check Box9.1.0.2.1', 'Check Box9.1.1.2.1');
+    set.ch_sputum = lines([s(F['Text3.6.5.1.2.0.1.1.0']), s(F['Text3.6.5.1.2.0.1.1.1']), s(F['Text3.6.5.1.2.0.1.1.2.0'])]);
+    set.ch_height = num(F['Text3.6.5.1.2.0.1.1.2.1.0']); set.ch_weight = num(F['Text3.6.5.1.2.0.1.1.2.1.1.0']); set.ch_bmi = num(F['Text3.6.5.1.2.0.1.1.2.1.2']);
+    set.ch_gi_specify = lines([s(F['Text3.6.5.1.2.0.1.1.2.1.1.1.0']), s(F['Text3.6.5.1.2.0.1.1.2.1.1.1.1.0'])]);
+    set.ch_eat_assist = lines([s(F['Text3.6.5.1.2.0.1.1.2.1.1.1.1.1.0']), s(F['Text3.6.5.1.2.0.1.1.2.1.1.1.1.1.1'])]);
+    set.ch_smell = lines([s(F['Text3.6.5.1.2.0.1.1.2.1.1.1.1.1.2']), s(F['Text3.6.5.1.2.0.1.1.2.1.1.1.1.1.3'])]);
+    set.ch_oral = ynbox(F, 'Check Box4.0.0', 'Check Box4.1.0');
+    set.ch_dentures = pick(F, [['Check Box4.0.1.0', 'Full upper'], ['Check Box4.0.1.1', 'Full lower'], ['Check Box4.0.1.2', 'Partial upper'], ['Check Box4.0.1.3', 'Partial lower'], ['Check Box4.0.1.4', 'No']]);
+    if (on(F, 'Check Box4.0.1.0') && on(F, 'Check Box4.0.1.1')) set.ch_dentures = 'Both full';
+    set.ch_teeth = pick(F, [['Check Box4.1.1.0', 'Full upper'], ['Check Box4.1.1.1', 'Full lower'], ['Check Box4.1.1.2', 'Partial upper'], ['Check Box4.1.1.3.0', 'Partial lower'], ['Check Box4.1.1.4.0', 'No']]);
+    set.ch_teeth_broken = ynbox(F, 'Check Box4.1.1.3.1', 'Check Box4.1.1.4.1'); set.ch_teeth_decay = ynbox(F, 'Check Box4.1.1.3.2', 'Check Box4.1.1.4.2');
+    set.ch_dentist = ynbox(F, 'Check Box4.1.1.3.3', 'Check Box4.1.1.4.3'); set.ch_gum = ynbox(F, 'Check Box4.1.1.3.4', 'Check Box4.1.1.4.4');
+    set.ch_abdomen = s(F['Text5.1.0']); set.ch_bowel_issue = ynbox(F, 'Check Box4.1.1.3.5', 'Check Box4.1.1.4.5');
+    set.ch_cog = ynbox(F, 'Check Box6.0.0', 'Check Box6.1.0'); set.ch_cog_specify = s(F['Text9.0']);
+    set.ch_orient = ynbox(F, 'Check Box6.0.1', 'Check Box6.1.1'); set.ch_compreh = ynbox(F, 'Check Box6.0.2', 'Check Box6.1.2');
+    set.ch_memory = ynbox(F, 'Check Box6.0.3', 'Check Box6.1.3'); set.ch_memory_specify = lines([s(F['Text9.3']), s(F['Text9.1']), s(F['Text9.2']), s(F['Text11'])]);
+    add.ch_behaviours = picks(F, [['Check Box10.0.0', 'Wandering'], ['Check Box10.0.3', 'Repetitive questions'], ['Check Box10.0.8', 'Confusion'], ['Check Box10.0.7', 'Anxious'], ['Check Box10.1.0', 'Delusions'], ['Check Box10.1.1', 'Depressive symptoms'], ['Check Box10.1.6', 'Paranoia'], ['Check Box10.1.7', 'Resistive'], ['Check Box10.1.8', 'Restless'], ['Check Box10.2.0', 'Withdrawn'], ['Check Box10.2.1', 'Mood swing']]);
+    const sw = raw(F['Text12.0']); set.ch_swallow = yn(sw) || (/nil|no issue|none/i.test(sw) ? 'No' : (sw ? 'Yes' : ''));
+    const tx = raw(F['Text12.2']); set.ch_texture = yn(tx) || (/n\/?a|nil|no/i.test(tx) ? 'No' : (tx ? 'Yes' : ''));
+    set.ch_walk_unaided = ynbox(F, 'Check Box13.0.0', 'Check Box13.0.1'); set.ch_aids = s(F['Text14.0']);
+    set.ch_msk_notes = lines([labelled('Turn over in bed', F['Text14.1.1']), labelled('Supine to sit', F['Text14.1.2.0']), labelled('Sit to stand', F['Text14.1.2.1']), labelled('Bed to chair', F['Text14.1.2.2']), labelled('Gait', F['Text14.1.4.1.0']), labelled('Turning', F['Text14.1.4.1.1.0']), labelled('Deformity / contracture', F['Text14.1.4.1.1.1.0']), labelled('Joints', F['Text14.1.4.1.1.1.1.0']), labelled('Fall last 3 months', F['Text14.1.4.1.1.1.1.1']), labelled('Swallowing', F['Text12.1']), labelled('Texture', F['Text12.3'])]);
+    const smoke = raw(F['Text15.0.0']); if (smoke) set.cp_prev_smoke = /^n|nil|non/i.test(smoke) ? 'No' : (/stop|ex|quit/i.test(smoke) ? 'Stopped' : 'Yes');
+    set.cp_prev_smoke_detail = s(F['Text15.0.1']);
+    const alc = raw(F['Text15.0.2']); if (alc) set.cp_prev_alcohol = /^n|nil|non/i.test(alc) ? 'No' : (/stop|ex|quit/i.test(alc) ? 'Stopped' : 'Yes');
+    set.cp_prev_alcohol_detail = s(F['Text15.0.3']);
+    set.acd_have = ynbox(F, 'Check Box16.1.0', 'Check Box16.1.1'); set.acd_more_info = ynbox(F, 'Check Box16.0.0', 'Check Box16.0.1');
+    set.comprehensive_rn = s(F['Text10.0']); set.comprehensive_date = dmy(F['Text10.1']);
+    set.med_diagnosis = s(F['Text2.0']); set.med_allergies = allergies(F['Text4.0'], F['Text4.1']); set.p_language = set.ch_lang; if (set.ch_interpreter) set.p_interpreter = set.ch_interpreter;
+    append.p_background = labelled("Client's preference and choice", F['Text2.1']);
+    return { set: set, add: add, append: append, tools: ['comprehensive'], date: set.comprehensive_date, client: { name: s(F['Text1.0']), dob: dmy(F['Text1.1']) } };
+  }
+
+  const MAPPERS = { careplan: mapCarePlan, frat: mapFrat, pain: mapPain, communication: mapCommunication, mobility: mapMobility, hygiene: mapHygiene, comprehensive: mapComprehensive, nutrition: mapNutrition };
+
+  function mapForm(F) {
+    const t = detect(F); if (!t) return null;
+    const m = MAPPERS[t.id](F);
+    // drop empties
+    Object.keys(m.set).forEach(function (k) { const v = m.set[k]; if (v == null || v === '' || (Array.isArray(v) && !v.length)) delete m.set[k]; });
+    Object.keys(m.add).forEach(function (k) { if (!m.add[k] || !m.add[k].length) delete m.add[k]; });
+    Object.keys(m.append).forEach(function (k) { if (!m.append[k]) delete m.append[k]; });
+    m.template = t.id; m.label = t.label;
+    m.count = Object.keys(m.set).length + Object.keys(m.add).length + Object.keys(m.append).length;
+    return m;
+  }
+
+  /* ---- apply to the record: fill only what is empty; remember what was filled ---- */
+  function apply(mapped, D) {
+    const filled = D.__legacy_fill = D.__legacy_fill || {};
+    let n = 0;
+    function empty(cur) { return cur == null || cur === '' || cur === 0 || cur === false || (Array.isArray(cur) && !cur.length); }
+    mapped.forEach(function (m) {
+      Object.keys(m.set).forEach(function (k) {
+        if (k === '__risk0') { if (!Array.isArray(D.cp_risks)) D.cp_risks = []; const blank = D.cp_risks.filter(function (r) { return (r.risk || '').trim() || (r.action || '').trim(); }).length === 0; if (blank) { D.cp_risks = [m.set.__risk0]; n++; } return; }
+        if (empty(D[k])) { D[k] = m.set[k]; filled[k] = m.set[k]; n++; }
+      });
+      Object.keys(m.add).forEach(function (k) {
+        if (empty(D[k])) { D[k] = m.add[k].slice(); filled[k] = D[k].slice(); n++; }
+      });
+      Object.keys(m.append).forEach(function (k) {
+        const cur = D[k] ? String(D[k]).trim() : '';
+        if (cur.indexOf(m.append[k]) >= 0) return;
+        D[k] = cur ? cur + '\n' + m.append[k] : m.append[k]; filled[k] = D[k]; n++;
+      });
+    });
+    return n;
+  }
+
+  return { readFields: readFields, detect: detect, mapForm: mapForm, apply: apply, dmy: dmy };
+})();
+
+/* Option lists for the FRAT score → option text mapping (kept in sync with the FRAT block) */
+const ODC_LEGACY_OPTS = {
+  frat_falls_hx: ['0 No falls last 12m', '1 Falls in last 6m', '2 Falls in last 3m', '3 Fall this month'],
+  frat_balance: ['0 Chair/bedfast — pivot with help', '1 Needs assist & device + 2 helpers', '2 Ambulates with assist device', '3 Ambulates alone'],
+  frat_mental: ['0 Orientated', '1 Orientated to person & place', '2 Orientated to person — depression', '3 Disoriented / depressed'],
+  frat_general: ['0 Well-nourished', '1 Poor appetite/sleep', '2 Infection / hypoxia / sleep dist.', '3 Severe / pain / malnourished'],
+  frat_vision: ['0 Normal', '1 Glasses', '2 Blurred / cataract / glaucoma', '3 Severe disturbance / language barrier'],
+  frat_hearing: ['0 Normal', '1 Slight loss', '2 Hearing aid', '3 Deaf'],
+  frat_speech: ['0 Normal', '1 Defect — intelligible', '2 Dysphasia / language barrier', '3 Severe defect'],
+  frat_meds: ['0 No effectors', '1 CV effectors', '2 CNS effectors', '3 Both CV & CNS'],
+  frat_age: ['0 < 20', '1 20–60', '2 60–70', '3 > 70'],
+  frat_chronic: ['0 None', '1 One chronic', '2 More than one', '3 Multiple illnesses'],
+  frat_inc: ['0 None', '1 Frequency / nocturia', '2 Stress incontinence', '3 Urge / faecal'],
+  frat_foot: ['0 None', '1 Ill-fitting shoes', '2 Wounds / painful feet', '3 Neuropathy / contractures'],
+  frat_drug: ['0 Nil', '1 Mild', '2 Moderate', '3 Heavy regular'],
+  frat_env: ['0 Nil dangers', '1 One risk', '2 Two risks', '3 Multiple risks']
+};
+
+/* "Last year's form" tags — a filled field keeps its tag until its value changes */
+function legacyApplyTags() {
+  const D = state.data;
+  const fill = (D && D.__legacy_fill) || {};
+  document.querySelectorAll('.legacy-tag').forEach(function (t) { t.remove(); });
+  document.querySelectorAll('.legacy-tagged').forEach(function (h) { h.classList.remove('legacy-tagged'); });
+  Object.keys(fill).forEach(function (k) {
+    const same = JSON.stringify(D[k]) === JSON.stringify(fill[k]);
+    if (!same) { delete fill[k]; return; }
+    document.querySelectorAll('[data-key="' + k + '"], [data-cgroup="' + k + '"], [data-rgroup="' + k + '"]').forEach(function (el) {
+      if (el.closest('.legacy-tagged')) return;
+      const host = el.closest('label.field, .field, .chk-group, .check-grid') || el;
+      host.classList.add('legacy-tagged');
+      const tag = document.createElement('span');
+      tag.className = 'legacy-tag no-print';
+      tag.style.cssText = 'display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;color:#1d4e89;background:#eaf2fb;border:1px solid #7da7d9;border-radius:3px;padding:1px 6px;margin:4px 0 0';
+      tag.textContent = "LAST YEAR'S FORM — REVIEW";
+      host.appendChild(tag);
+      const clear = function () { if (JSON.stringify(D[k]) !== JSON.stringify(fill[k])) { delete fill[k]; tag.remove(); host.classList.remove('legacy-tagged'); } };
+      host.addEventListener('input', clear); host.addEventListener('change', clear);
+    });
+  });
+}
+
+(function initLegacyImport() {
+  const btns = Array.prototype.slice.call(document.querySelectorAll('[data-legacy-import]'));
+  if (!btns.length) return;
+
+  async function spFind() {
+    const driveId = await ODC_SPB.drive();
+    const queries = ['Care Plan', 'Assessment', 'FRAT'];
+    const seen = {}; const items = [];
+    for (const q of queries) {
+      try {
+        const res = await ODC_CLOUD.graph('/drives/' + driveId + "/root/search(q='" + q + "')?$top=80&$select=id,name,lastModifiedDateTime,parentReference,webUrl,file,size");
+        (res.value || []).forEach(function (it) { if (it.file && /\.pdf$/i.test(it.name || '') && !seen[it.id]) { seen[it.id] = 1; items.push(it); } });
+      } catch (e) { console.warn('legacy search failed', q, e); }
+    }
+    const toks = (state.data.p_name || '').toLowerCase().split(/\s+/).filter(function (w) { return w.length > 2; });
+    return items.filter(function (it) {
+      let hay = ''; try { hay = decodeURIComponent(((it.parentReference && it.parentReference.path) || '') + ' ' + it.name).toLowerCase(); } catch (e) { hay = (it.name || '').toLowerCase(); }
+      if (/package overview|support plan|finalised|notice of decision/i.test(it.name || '')) return false;
+      if (!toks.length) return true;
+      return toks.filter(function (w) { return hay.indexOf(w) >= 0; }).length >= Math.min(2, toks.length);
+    }).sort(function (a, b) { return new Date(b.lastModifiedDateTime) - new Date(a.lastModifiedDateTime); });
+  }
+  async function spBuffer(itemId) {
+    const driveId = await ODC_SPB.drive(); const token = await ODC_CLOUD.getToken();
+    const r = await fetch('https://graph.microsoft.com/v1.0/drives/' + driveId + '/items/' + itemId + '/content', { headers: { 'Authorization': 'Bearer ' + token } });
+    if (!r.ok) throw new Error('Could not download (HTTP ' + r.status + ')');
+    return r.arrayBuffer();
+  }
+
+  function openModal() {
+    let bg = document.getElementById('legacyImportBg'); if (bg) bg.remove();
+    bg = document.createElement('div'); bg.id = 'legacyImportBg'; bg.className = 'no-print';
+    bg.style.cssText = 'display:flex;position:fixed;inset:0;background:rgba(26,32,23,.45);z-index:9999;align-items:center;justify-content:center';
+    bg.innerHTML = '<div style="background:#fff;border-radius:8px;max-width:680px;width:94%;max-height:90vh;overflow-y:auto;padding:20px">' +
+      '<h2 class="serif" style="margin:0 0 4px">Import <em>last year’s forms</em></h2>' +
+      '<p style="margin:0 0 12px;font-size:12.5px;color:var(--ink-muted)">Reads the ODC fillable PDF forms used before this app (Care Plan v0.1, FRAT, Pain, Speech/Communication, Mobility, Personal Hygiene, Comprehensive Health, Nutrition). Answers are copied into every field that is still empty and tagged for review — nothing already written is changed.</p>' +
+      '<div style="margin-bottom:12px"><span style="font-size:11px;text-transform:uppercase;letter-spacing:.02em;color:var(--ink-muted);font-weight:600">Method 0 — SharePoint</span><br/><button type="button" class="mini-btn" id="lgSpFind" style="margin-top:4px">🔍 Find this client’s forms on SharePoint</button><div id="lgSpList" style="margin-top:6px;max-height:200px;overflow-y:auto"></div></div>' +
+      '<label class="field" style="display:block;margin-bottom:10px"><span>Method 1 — PDF files (select several at once)</span><input type="file" id="lgPdf" accept="application/pdf" multiple/></label>' +
+      '<div id="lgPreview"></div>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button type="button" class="btn ghost" id="lgCancel">Cancel</button><button type="button" class="btn" id="lgGo">Read forms</button></div></div>';
+    document.body.appendChild(bg);
+    bg.querySelector('#lgCancel').addEventListener('click', function () { bg.remove(); });
+    bg.addEventListener('click', function (e) { if (e.target === bg) bg.remove(); });
+    let spItems = [];
+    bg.querySelector('#lgSpFind').addEventListener('click', async function () {
+      const fb = bg.querySelector('#lgSpFind'), listEl = bg.querySelector('#lgSpList');
+      fb.disabled = true; fb.textContent = 'Searching SharePoint…';
+      try {
+        spItems = await spFind();
+        listEl.innerHTML = spItems.length ? spItems.slice(0, 20).map(function (it, i) {
+          let folder = ''; try { folder = decodeURIComponent(((it.parentReference && it.parentReference.path) || '').split('root:').pop() || ''); } catch (e) {}
+          return '<label style="display:flex;gap:8px;align-items:flex-start;padding:5px 8px;border:1px solid var(--line);border-radius:6px;margin-bottom:4px;font-size:12.5px;cursor:pointer"><input type="checkbox" data-lgsp="' + i + '" style="margin-top:3px"/><span><strong>' + _macEsc(it.name) + '</strong><br/><small style="color:var(--ink-muted)">' + _macEsc(folder) + ' · ' + new Date(it.lastModifiedDateTime).toLocaleDateString() + '</small></span></label>';
+        }).join('') : '<div style="font-size:12px;color:var(--ink-muted);padding:6px 0">No PDF forms found in this client’s folders — use Method 1.</div>';
+      } catch (err) { listEl.innerHTML = '<div style="font-size:12px;color:var(--warning);padding:6px 0">Search failed: ' + _macEsc(err.message || err) + '</div>'; }
+      fb.disabled = false; fb.textContent = '🔍 Find this client’s forms on SharePoint';
+    });
+
+    let parsed = null;
+    bg.querySelector('#lgGo').addEventListener('click', async function () {
+      const go = bg.querySelector('#lgGo');
+      if (parsed) { applyAll(parsed, bg); return; }
+      go.disabled = true; go.textContent = 'Reading…';
+      try {
+        const sources = [];
+        bg.querySelectorAll('[data-lgsp]:checked').forEach(function (cb) { const it = spItems[+cb.dataset.lgsp]; sources.push({ name: it.name, load: function () { return spBuffer(it.id); } }); });
+        Array.prototype.forEach.call(bg.querySelector('#lgPdf').files, function (f) { sources.push({ name: f.name, load: function () { return f.arrayBuffer(); } }); });
+        if (!sources.length) { alert('Choose at least one PDF form.'); go.disabled = false; go.textContent = 'Read forms'; return; }
+        const results = [];
+        for (const src of sources) {
+          try {
+            const r = await ODC_LEGACY.readFields(await src.load());
+            const m = ODC_LEGACY.mapForm(r.fields);
+            results.push({ name: src.name, widgets: r.widgets, mapped: m });
+          } catch (err) { results.push({ name: src.name, error: err.message || String(err) }); }
+        }
+        parsed = results;
+        bg.querySelector('#lgPreview').innerHTML = previewHtml(results);
+        go.disabled = false; go.textContent = 'Apply to this client';
+      } catch (err) { alert('Import failed: ' + (err.message || err)); go.disabled = false; go.textContent = 'Read forms'; }
+    });
+  }
+
+  function previewHtml(results) {
+    const e = _macEsc;
+    const cur = (state.data.p_name || '').trim().toLowerCase();
+    const rows = results.map(function (r, i) {
+      if (r.error) return '<tr><td>' + e(r.name) + '</td><td colspan="3" style="color:var(--warning)">Could not read: ' + e(r.error) + '</td></tr>';
+      if (!r.mapped) return '<tr><td>' + e(r.name) + '</td><td colspan="3" style="color:var(--warning)">Not an ODC fillable form (' + r.widgets + ' fields) — skipped</td></tr>';
+      const m = r.mapped; const nm = (m.client.name || '').toLowerCase();
+      const mismatch = cur && nm && !cur.split(/\s+/).some(function (w) { return w.length > 2 && nm.indexOf(w) >= 0; });
+      return '<tr><td><label style="display:flex;gap:6px"><input type="checkbox" data-lguse="' + i + '" checked/> ' + e(r.name) + '</label></td><td>' + e(m.label) + '</td><td>' + e(m.date || '—') + '</td><td>' + m.count + ' values' + (mismatch ? '<br/><span style="color:var(--warning)">⚠ form is for ' + e(m.client.name) + '</span>' : '') + '</td></tr>';
+    }).join('');
+    return '<table style="width:100%;border-collapse:collapse;font-size:12.5px"><thead><tr style="text-align:left;color:var(--ink-muted)"><th>File</th><th>Form</th><th>Date</th><th>Will fill</th></tr></thead><tbody>' + rows + '</tbody></table>' +
+      '<p style="font-size:12px;color:var(--ink-muted);margin:8px 0 0">Only empty fields are filled. Each filled field shows a blue <strong>LAST YEAR’S FORM — REVIEW</strong> tag until you edit it. The forms’ assessment blocks are switched on under Additional Assessments.</p>';
+  }
+
+  function applyAll(results, bg) {
+    const use = [];
+    bg.querySelectorAll('[data-lguse]:checked').forEach(function (cb) { const r = results[+cb.dataset.lguse]; if (r && r.mapped) use.push(r); });
+    if (!use.length) { alert('Nothing selected.'); return; }
+    // Care plan first (participant details), then assessments
+    use.sort(function (a, b) { return (a.mapped.template === 'careplan' ? 0 : 1) - (b.mapped.template === 'careplan' ? 0 : 1); });
+    const n = ODC_LEGACY.apply(use.map(function (r) { return r.mapped; }), state.data);
+    use.forEach(function (r) { (r.mapped.tools || []).forEach(function (t) { state.selectedTools[t] = true; state.manualTools[t] = true; }); });
+    state.data.__legacy = { at: Date.now(), files: use.map(function (r) { return { name: r.name, template: r.mapped.template, date: r.mapped.date || '', count: r.mapped.count }; }) };
+    bg.remove();
+    ['initialContent', 'annualContent', 'careplanContent'].forEach(function (id) { const el = document.getElementById(id); if (el && el.children.length) applyState(el); });
+    if (typeof renderToolsList === 'function') renderToolsList();
+    if (typeof renderAxBlocks === 'function') renderAxBlocks();
+    if (document.querySelector('#careplanContent .cp-domain')) renderCarePlan();
+    if (typeof renderAnnualAdjuncts === 'function') try { renderAnnualAdjuncts(); } catch (e) {}
+    legacyApplyTags();
+    autoSave();
+    alert(n + ' field(s) filled from ' + use.length + ' form(s).\n\nReview each blue-tagged field — edit it (or leave it) and the tag clears once the value changes.');
+  }
+
+  btns.forEach(function (b) { b.addEventListener('click', openModal); });
+
+  // keep tags after any re-render of the forms
+  ['renderCarePlan', 'renderAxBlocks'].forEach(function (fn) {
+    const orig = window[fn];
+    if (typeof orig === 'function' && !orig.__legacyWrapped) {
+      window[fn] = function () { const r = orig.apply(this, arguments); try { legacyApplyTags(); } catch (e) {} return r; };
+      window[fn].__legacyWrapped = true;
+    }
+  });
+  const origGo = window.goTo;
+  if (typeof origGo === 'function' && !origGo.__legacyWrapped) { window.goTo = function () { const r = origGo.apply(this, arguments); try { legacyApplyTags(); } catch (e) {} return r; }; window.goTo.__legacyWrapped = true; }
 })();
 
 /* ---------- Import from Onboarding (All Onboarding Forms app) ----------
