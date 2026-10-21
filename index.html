@@ -18,8 +18,16 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v2.8.2 (21 Oct 2026)
+     APP VERSION: v2.9 (21 Oct 2026)
      Version history:
+       v2.9 — One-click PDF filing: with ODC_CLOUD_CONFIG.pdfService.url set, the
+              "Save to client folder" dialog gets a "Create the PDF and save it"
+              button. The app snapshots the page exactly as the Print Bundle
+              shows it and an Azure Function (pdf-service/, headless Chromium)
+              renders it — same output as Print → Save as PDF — then the PDF is
+              filed in the client's SharePoint folder with the standard name.
+              Falls back to the drop zone / SharePoint-converted trial when the
+              service is not configured.
        v2.8 — MAC Support Plan import + care-plan draft generator: "📄 Import MAC
               Support Plan" reads a My Aged Care Support Plan (REP001 — HCP or
               Support at Home layout) or an Assessment outcome letter (LTR003)
@@ -78,8 +86,9 @@
               keys renamed (an_rn_*) so its signature prints; Care Plan dates as
               dd/mm/yyyy; participant signature no longer dropped from PDFs;
               Participant block removed from Initial AX sign-off.
-     NOTE: bump this version block AND the two visible badges (login overlay
-     'Cloud · vX.Y' + topbar 'CARE PLAN WORKFLOW · vX.Y') on every change.
+     NOTE: bump this version block, the login-overlay badge 'Cloud · vX.Y' and
+     APP_VERSION on every change. The version is shown on the login page only —
+     the topbar and the forms / print headers carry no version (v2.9 decision).
      Auth: MSAL.js (Microsoft Authentication Library)
      We try multiple CDNs because some networks block Microsoft's own CDN.
      ============================================================ -->
@@ -131,6 +140,15 @@
       sitePath: '/sites/AgedCareTeam622',
       folder:   'Service Agreement Records',
       appUrl:   'https://onedream-hy.github.io/contract-client/'
+    },
+    // v2.9 — PDF service (Azure Function running headless Chromium). When url is
+    // set, "Save to client folder" can create the PDF itself, identical to the
+    // printed version, and file it in one click. Leave url '' to fall back to
+    // Print → Save as PDF → drop (and the plainer SharePoint-converted trial).
+    // scope = the app registration's exposed API scope (see pdf-service/README.md).
+    pdfService: {
+      url:   'https://odc-pdf-service.azurewebsites.net/api/render',
+      scope: 'api://c47d2e17-f266-4271-80e6-46170c254ef4/Pdf.Render'
     }
   };
 </script>
@@ -215,6 +233,19 @@ window.ODC_CLOUD = (function() {
       await _msalApp.acquireTokenRedirect({ scopes: cfg.scopes });
       // Page redirects — control returns via handleRedirectPromise. Token will be available on the next attempt.
       throw new Error('Token refresh required — redirecting to sign-in.');
+    }
+  }
+
+  // Token for a scope other than Graph (e.g. the PDF service's api:// scope).
+  // Tries silently, then a popup — never a redirect, so unsaved work is kept.
+  async function getTokenFor(scopes) {
+    if (!_account) throw new Error('Not signed in');
+    const req = { account: _account, scopes: scopes };
+    try { return (await _msalApp.acquireTokenSilent(req)).accessToken; }
+    catch (err) {
+      console.warn('Silent token for', scopes, 'failed — trying a popup:', err);
+      const r = await _msalApp.acquireTokenPopup(req);
+      return r.accessToken;
     }
   }
 
@@ -549,7 +580,7 @@ window.ODC_CLOUD = (function() {
 
   return {
     init: init, login: login, logout: logout,
-    getToken: getToken, getUser: getUser, graph: graph,
+    getToken: getToken, getTokenFor: getTokenFor, getUser: getUser, graph: graph,
     resolveSite: resolveSite, resolveLists: resolveLists, testConnection: testConnection,
     resolveClientsColumns: resolveClientsColumns,
     resolveUpdatesColumns: resolveUpdatesColumns,
@@ -1166,7 +1197,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v2.8.2</span>
+    <span class="badge">Cloud · v2.9</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1180,7 +1211,7 @@ window.ODC_CLOUD = (function() {
     <div class="brand">
       <img id="topLogo" alt="One Dream Community" class="brand-logo"/>
       <span>One Dream Community</span>
-      <small id="modeLabel">CARE PLAN WORKFLOW · v2.8.2</small>
+      <small id="modeLabel">CARE PLAN WORKFLOW</small>
     </div>
     <span class="mode-chip" id="modeChip" style="display:none">New Client</span>
     <span class="client-chip" id="clientChip" style="display:none">—</span>
@@ -1447,7 +1478,7 @@ window.ODC_CLOUD = (function() {
     <div style="flex:0 0 auto;padding-bottom:10px;border-bottom:1px solid var(--line)">
       <div style="display:flex;align-items:center;gap:10px">
         <h2 class="serif" style="margin:0;flex:1">Interim <em>Care Plan</em></h2>
-        <span style="font-size:12px;color:var(--ink-muted)">v0.1 · MAY 2024</span>
+        
       </div>
       <p style="margin:4px 0 0;font-size:13.5px;color:var(--ink-soft)">Brief care guidance for staff to follow between Initial Assessment and the full Care Plan. Auto-fills from the Initial Assessment — review and edit as needed.</p>
     </div>
@@ -1621,14 +1652,14 @@ window.ODC_CLOUD = (function() {
 <main id="appMain" style="display:none">
   <!-- Step 1: Initial Assessment & Planning (NEW CLIENT MODE) -->
   <section class="step-panel" id="step-initial" data-step="initial">
-    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Initial Assessment & Planning</strong>One Dream Community</div><div class="ph-ver">v0.2 · MAY 2024</div></div>
+    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Initial Assessment & Planning</strong>One Dream Community</div></div>
     <div class="page-head">
       <div>
         <h1>Initial <em>Assessment</em> & Planning.</h1>
         <p>Comprehensive RN/Care Manager assessment across 19 domains. Identification, contacts, medical and care domains in one place — no duplicate entry. At the end, tick the formal scoring tools and individual assessments needed: selected items appear in <strong>Step 2</strong>.</p>
         <button type="button" class="btn ghost no-print" id="btnImportOnboarding" style="margin-top:10px">⬇ Import from Onboarding form</button>
       </div>
-      <div class="step-meta"><span class="big">01</span>Step One<span class="doc-ref">Doc Ref: Initial Ax v0.2 MAY 2024</span></div>
+      <div class="step-meta"><span class="big">01</span>Step One</div>
     </div>
     <div id="initialContent"></div>
     <div class="nav-row no-print">
@@ -1663,13 +1694,13 @@ window.ODC_CLOUD = (function() {
 
   <!-- Annual: Step 1 — Annual Assessment & Planning -->
   <section class="step-panel" id="step-annual" data-step="annual">
-    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Annual Assessment & Planning</strong>One Dream Community</div><div class="ph-ver">v0.2 · SEP 2025</div></div>
+    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Annual Assessment & Planning</strong>One Dream Community</div></div>
     <div class="page-head">
       <div>
         <h1>Annual <em>Assessment</em> & Planning.</h1>
         <p>For clients <strong>after 12 months</strong> of service who are <strong>low level / non-complex</strong>. This single bundled document replaces the full re-assessment. FRAT and Comprehensive Health/Medical Ax are done <em>separately</em> if missing from the file — toggle them on under <em>Adjuncts</em>.</p>
       </div>
-      <div class="step-meta"><span class="big">01</span>Annual<span class="doc-ref">Doc Ref: Annual Ax v0.2 SEP 2025</span></div>
+      <div class="step-meta"><span class="big">01</span>Annual</div>
     </div>
     <div id="annualContent"></div>
     <div class="card no-print">
@@ -1685,7 +1716,7 @@ window.ODC_CLOUD = (function() {
 
   <!-- Care Plan -->
   <section class="step-panel" id="step-careplan" data-step="careplan">
-    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan</strong>One Dream Community</div><div class="ph-ver">v0.3 · JAN 2026</div></div>
+    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan</strong>One Dream Community</div></div>
     <div class="page-head">
       <div>
         <h1><em>Care</em> Plan.</h1>
@@ -1696,7 +1727,7 @@ window.ODC_CLOUD = (function() {
           <button type="button" class="btn" id="btnMacDraft">✨ Generate care plan draft</button>
         </div>
       </div>
-      <div class="step-meta"><span class="big" id="cpStepNum">03</span><span id="cpStepLabel">Step Three</span><span class="doc-ref">Doc Ref: Care Plan v0.3 JAN 2026</span></div>
+      <div class="step-meta"><span class="big" id="cpStepNum">03</span><span id="cpStepLabel">Step Three</span></div>
     </div>
     <div id="careplanContent"></div>
     <div class="nav-row no-print">
@@ -1707,26 +1738,26 @@ window.ODC_CLOUD = (function() {
 
   <!-- Interim Care Plan — printable view, populated from state.data icp_* fields -->
   <section class="step-panel" id="step-interim-cp" data-step="interimCP" style="display:none">
-    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Interim Care Plan</strong>One Dream Community</div><div class="ph-ver">v0.1 · MAY 2024</div></div>
+    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Interim Care Plan</strong>One Dream Community</div></div>
     <div class="page-head">
       <div>
         <h1>Interim <em>Care Plan</em>.</h1>
         <p>Brief care guidance for staff to follow between Initial Assessment and the full Care Plan, signed off by the assessing RN.</p>
       </div>
-      <div class="step-meta"><span class="big">IC</span>Interim CP<span class="doc-ref">Doc Ref: Interim CP v0.1 MAY 2024</span></div>
+      <div class="step-meta"><span class="big">IC</span>Interim CP</div>
     </div>
     <div id="interimPrintContent"></div>
   </section>
 
   <!-- Updates History — only rendered when included in print bundle. Populated dynamically before print. -->
   <section class="step-panel" id="step-updates-history" data-step="updatesHistory" style="display:none">
-    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — Update History</strong>One Dream Community</div><div class="ph-ver">v0.1 · MAY 2026</div></div>
+    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — Update History</strong>One Dream Community</div></div>
     <div class="page-head">
       <div>
         <h1>Update <em>History</em>.</h1>
         <p>Chronological record of all changes, additions, and notes recorded for this client. Each entry shows who made the change, when, and why. <em>Approved</em> entries have been signed off by the Care Manager / RN; <em>Pending Review</em> entries are awaiting approval.</p>
       </div>
-      <div class="step-meta"><span class="big">UH</span>Update History<span class="doc-ref">Doc Ref: Update History v0.1 MAY 2026</span></div>
+      <div class="step-meta"><span class="big">UH</span>Update History</div>
     </div>
     <div id="updatesHistoryContent"></div>
   </section>
@@ -1740,9 +1771,9 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v0.4";
+const APP_VERSION = "v2.9"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
-const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v0.2", "date": "MAY 2024"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v0.2", "date": "SEP 2025"}, "careplan": {"title": "Care Plan", "ver": "v0.3", "date": "JAN 2026"}, "pain": {"title": "Pain Assessment", "ver": "v0.1", "date": "MAY 2024"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v0.1", "date": "MAY 2024"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v0.1", "date": "MAY 2024"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v0.1", "date": "MAY 2024"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v0.1", "date": "MAY 2024"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v0.1", "date": "MAY 2024"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v0.1", "date": "MAY 2024"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v0.1", "date": "MAY 2024"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v0.1", "date": "MAY 2024"}, "mobility": {"title": "Mobility Assessment", "ver": "v0.1", "date": "MAY 2024"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v0.1", "date": "MAY 2024"}, "medications": {"title": "Medications Management", "ver": "v0.1", "date": "MAY 2024"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v0.1", "date": "MAY 2024"}, "palliative": {"title": "Palliative Care Management", "ver": "v0.1", "date": "MAY 2024"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v0.1", "date": "MAY 2024"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v0.1", "date": "MAY 2024"}};
+const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
 const AUTO_TRIGGERS = {"ia_pain_yes": ["pain"], "ia_chronicPain": ["pain"], "ia_skinIssue": ["skin"], "ia_pressureInjuryRisk": ["skin"], "ia_woundActive": ["wound", "skin"], "ia_skinTear": ["skin", "wound"], "ia_incontinent": ["continence"], "ia_catheter": ["catheter", "continence"], "ia_weightLoss": ["mna", "nutrition"], "ia_swallowing": ["nutrition", "communication"], "ia_pegFeeding": ["nutrition"], "ia_appetiteIssue": ["mna"], "ia_diabetes": ["diabetes"], "ia_falls12m": ["frat", "mobility"], "ia_mobilityAid": ["mobility"], "ia_balanceIssue": ["frat", "mobility"], "ia_behaviour": ["behaviour"], "ia_dementia": ["behaviour", "communication"], "ia_psychotropic": ["behaviour", "medications"], "ia_polypharmacy": ["medications"], "ia_anticoagulant": ["medications"], "ia_insulin": ["medications", "diabetes"], "ia_hygieneAssist": ["hygiene"], "ia_palliative": ["palliative"], "ia_complexNeed": ["comprehensive"], "ia_visionIssue": ["communication"], "ia_legallyBlind": ["communication"], "ia_hearingIssue": ["communication"], "ia_speechIssue": ["communication"], "ia_cognitiveImpair": ["communication", "behaviour"]};
 
@@ -1813,7 +1844,7 @@ function buildInitialAssessment() {
   return `
   <!-- ============ PART I: Participant details & contact ============ -->
   <div class="card">
-    <div class="sec-head"><h2>Part I · Participant details</h2><span class="ver-tag">Initial Ax v0.2 · SEP 2025</span></div>
+    <div class="sec-head"><h2>Part I · Participant details</h2></div>
     <div class="grid two">
       ${txt('p_name','Participant name')}
       ${txt('p_dob','Date of birth',{type:'date'})}
@@ -2404,7 +2435,7 @@ function buildInitialAssessment() {
 function buildAnnualAssessment() {
   return `
   <div class="card">
-    <div class="sec-head"><h2>Part 1 · Participant details & contacts</h2><span class="ver-tag">Annual Ax v0.2</span></div>
+    <div class="sec-head"><h2>Part 1 · Participant details & contacts</h2></div>
     <div class="grid two">
       ${txt('p_name','Participant name')}
       ${txt('p_dob','Date of birth',{type:'date'})}
@@ -3047,7 +3078,7 @@ function renderToolsList() {
     const checked = state.selectedTools[id] ? 'checked' : '';
     return `<label class="tool-row ${auto?'auto':''}">
       <input type="checkbox" class="tool-toggle" data-tool="${id}" ${checked}/>
-      <div class="tool-meta"><strong>${d.title}</strong><small>${d.ver} · ${d.date}</small></div>
+      <div class="tool-meta"><strong>${d.title}</strong></div>
       ${auto?'<span class="auto-flag">auto</span>':''}
     </label>`;
   }).join('');
@@ -3089,10 +3120,10 @@ function renderAxBlocks() {
     const d = DOCS[id];
     const html = ASSESSMENTS[id] ? ASSESSMENTS[id]() : `<p class="subtitle">Form not implemented.</p>`;
     return `<div class="ax-block print-page" data-ax-id="${id}">
-      <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>${d.title}</strong>One Dream Community</div><div class="ph-ver">${d.ver} · ${d.date}</div></div>
+      <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>${d.title}</strong>One Dream Community</div></div>
       <div class="ax-block-head">
         <h3>${d.title}</h3>
-        <span class="ver-tag">${d.ver} · ${d.date}</span>
+        
         <button class="ax-collapse-btn no-print" data-collapse="${id}">Collapse ▾</button>
       </div>
       <div class="ax-client-strip" style="margin:0 0 8px;padding:6px 10px;background:var(--accent-light);border-left:3px solid var(--accent);border-radius:0 4px 4px 0;font-size:12.5px;color:var(--accent-deep)"></div>
@@ -3125,7 +3156,7 @@ function renderAnnualAdjuncts() {
     const checked = state.selectedTools[id] ? 'checked' : '';
     return `<label class="tool-row">
       <input type="checkbox" class="tool-toggle" data-tool="${id}" ${checked}/>
-      <div class="tool-meta"><strong>${d.title}</strong><small>${d.ver} · ${d.date} — only if missing from file</small></div>
+      <div class="tool-meta"><strong>${d.title}</strong><small>only if missing from file</small></div>
     </label>`;
   }).join('');
   root.querySelectorAll('.tool-toggle').forEach(t => {
@@ -3846,8 +3877,8 @@ function cpDomain(id, label, opts) {
   const extra = opts.extra || '';
   return `
   <div class="card cp-domain print-page" data-cpdomain="${id}">
-    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — ${label}</strong>One Dream Community</div><div class="ph-ver">v0.3 · JAN 2026</div></div>
-    <div class="sec-head"><h3>${label}</h3><span class="ver-tag">Care Plan v0.3</span></div>
+    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — ${label}</strong>One Dream Community</div></div>
+    <div class="sec-head"><h3>${label}</h3></div>
     ${auto ? `<p class="subtitle" style="background:var(--accent-light);padding:6px 10px;border-radius:4px"><strong>Auto-populated from assessment:</strong> ${auto}</p>` : ''}
     ${extra}
     ${ta('cp_'+id+'_needs','Care needs, choice and preferences',{rows:3})}
@@ -4043,8 +4074,8 @@ function buildCarePlan() {
   return `
   <!-- Part I: Participant snapshot (already captured in Initial / Annual Ax) -->
   <div class="card print-page" data-cpdomain="snapshot">
-    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — Participant Snapshot</strong>One Dream Community</div><div class="ph-ver">v0.3 · JAN 2026</div></div>
-    <div class="sec-head"><h2>Participant snapshot</h2><span class="ver-tag">Care Plan v0.3 · Part I</span></div>
+    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — Participant Snapshot</strong>One Dream Community</div></div>
+    <div class="sec-head"><h2>Participant snapshot</h2></div>
     <p class="subtitle">Auto-pulled from the assessment — do not re-enter. Edit only if information has changed.</p>
     <div class="grid two">
       <div><strong>Name:</strong> ${D.p_name||'—'} · <strong>Preferred:</strong> ${D.p_preferred||'—'}</div>
@@ -4075,7 +4106,7 @@ function buildCarePlan() {
 
   <!-- Preventative health measures -->
   <div class="card print-page" data-cpdomain="prev">
-    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — Preventative Health Measures</strong>One Dream Community</div><div class="ph-ver">v0.3 · JAN 2026</div></div>
+    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — Preventative Health Measures</strong>One Dream Community</div></div>
     <h3>Preventative health measures</h3>
     <h3 style="margin-top:14px">1. Vaccination status / immunisation history</h3>
     <p class="subtitle" style="margin-bottom:6px">Please attach details.</p>
@@ -4117,7 +4148,7 @@ function buildCarePlan() {
 
   <!-- PEEP & ACD -->
   <div class="card print-page" data-cpdomain="peep">
-    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — PEEP & Advanced Care</strong>One Dream Community</div><div class="ph-ver">v0.3 · JAN 2026</div></div>
+    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — PEEP & Advanced Care</strong>One Dream Community</div></div>
     <h3>Personal Emergency Evacuation Plan (PEEP)</h3>
     <p class="subtitle">What support is required to assist the consumer in an emergency / disaster?</p>
     <div class="grid two">
@@ -4138,7 +4169,7 @@ function buildCarePlan() {
 
   <!-- Part II: Risk Alert & Action Plan -->
   <div class="card warm print-page" data-cpdomain="risk">
-    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — Risk Alert & Action Plan</strong>One Dream Community</div><div class="ph-ver">v0.3 · JAN 2026</div></div>
+    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — Risk Alert & Action Plan</strong>One Dream Community</div></div>
     <div class="sec-head"><h2>Part II — Risk Alert & Action Plan</h2><span class="ver-tag warn">High priority</span></div>
     <p class="subtitle">Add a row for each identified risk and the agreed action plan. Use <em>Add risk</em> to insert another row.</p>
     <div id="riskList"></div>
@@ -4182,7 +4213,7 @@ function buildCarePlan() {
 
   <!-- Final signatures -->
   <div class="card print-page" data-cpdomain="signatures">
-    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — Agreement & Signatures</strong>One Dream Community</div><div class="ph-ver">v0.3 · JAN 2026</div></div>
+    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — Agreement & Signatures</strong>One Dream Community</div></div>
     <h2>Care Plan Agreement & Signatures</h2>
     <p class="subtitle">By signing this Care Plan, the participant agrees they have been involved in the development of their plan of care, goals and the services required, and gives permission for the Care Plan to be distributed to people involved in the development and support of their care, including nominated advocates / representatives, and may be included in any referrals made on their behalf.</p>
 
@@ -4691,7 +4722,7 @@ function showAppShell() {
   document.getElementById('modeChip').style.display = 'inline-block';
   document.getElementById('modeChip').textContent = state.mode === 'new' ? 'New Client' : 'Annual Review';
   document.getElementById('modeChip').classList.toggle('annual', state.mode==='annual');
-  document.getElementById('modeLabel').textContent = (state.mode==='annual'?'ANNUAL REVIEW · ':'NEW CLIENT · ') + APP_VERSION;
+  document.getElementById('modeLabel').textContent = state.mode==='annual' ? 'ANNUAL REVIEW' : 'NEW CLIENT'; // version is shown on the login page only
   updateClientChip();
 }
 
@@ -4953,16 +4984,16 @@ function buildPrintItems() {
   // Returns array of {key, label, meta, target (element), group}
   const items = [];
   if (state.mode === 'new') {
-    items.push({ key:'initial', group:'Assessments', label:'Initial Assessment & Planning', meta:'v0.2 · SEP 2025', target:document.getElementById('step-initial') });
+    items.push({ key:'initial', group:'Assessments', label:'Initial Assessment & Planning', meta:'', target:document.getElementById('step-initial') });
   } else if (state.mode === 'annual') {
-    items.push({ key:'annual', group:'Assessments', label:'Annual Assessment & Planning', meta:'v0.2 · SEP 2025', target:document.getElementById('step-annual') });
+    items.push({ key:'annual', group:'Assessments', label:'Annual Assessment & Planning', meta:'', target:document.getElementById('step-annual') });
   }
   // Additional assessments — based on currently selected tools
   TOOL_ORDER.forEach(id => {
     if (state.selectedTools[id]) {
       const block = document.querySelector(`[data-ax-id="${id}"]`);
       const d = DOCS[id];
-      if (block && d) items.push({ key:'ax_'+id, group:'Additional Assessments', label:d.title, meta:`${d.ver} · ${d.date}`, target:block });
+      if (block && d) items.push({ key:'ax_'+id, group:'Additional Assessments', label:d.title, meta:"", target:block });
     }
   });
   // Care Plan sections
@@ -4970,7 +5001,7 @@ function buildPrintItems() {
     const id = el.dataset.cpdomain;
     const titleEl = el.querySelector('.print-header strong, h2, h3');
     const label = titleEl ? titleEl.textContent.trim().replace(/^Care Plan — /,'') : id;
-    items.push({ key:'cp_'+id, group:'Care Plan', label, meta:'v0.3 · JAN 2026', target:el });
+    items.push({ key:'cp_'+id, group:'Care Plan', label, meta:'', target:el });
   });
   // Interim Care Plan — populate and include if any data
   if (renderInterimForPrint()) {
@@ -4978,7 +5009,7 @@ function buildPrintItems() {
       key:'interim_cp',
       group:'Interim Care Plan',
       label:'Interim Care Plan',
-      meta:'v0.1 · MAY 2024',
+      meta:'',
       target: document.getElementById('step-interim-cp')
     });
   }
@@ -4990,7 +5021,7 @@ function buildPrintItems() {
       key:'updates_history',
       group:'Update History',
       label: 'Update History (' + updateCount + ' entr' + (updateCount === 1 ? 'y' : 'ies') + ')',
-      meta:'v0.1 · MAY 2026',
+      meta:'',
       target: target
     });
   }
@@ -5366,9 +5397,8 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
   function buildSummary(b, lines) {
     const today = todayDMY();
     const L = [];
-    L.push('— Budgeted services (CareTok Package Overview' + (b.date ? ', ' + b.date : '') + ') —');
     (lines || b.services || []).forEach(function(sv) { L.push(sv); });
-    L.push('Budget updated ' + today);
+    L.push('Updated ' + today);
     return L.join('\n');
   }
 
@@ -5518,7 +5548,7 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
           const el = document.querySelector('#careplanContent [data-key="' + key + '"]');
           if (!el) { hidden.push(d); return; }
           const svKey = perDom[d].join('\n');
-          const block = lastDom[d] === svKey ? 'Budget reviewed ' + today + ' \u2014 no change.' : buildSummary(b, perDom[d]);
+          const block = lastDom[d] === svKey ? 'Updated ' + today + ' \u2014 no change.' : buildSummary(b, perDom[d]);
           lastDom[d] = svKey;
           const curv = state.data[key] ? String(state.data[key]).trim() : '';
           state.data[key] = curv ? curv + '\n\n' + block : block;
@@ -6056,7 +6086,7 @@ function macSummaryCard(D) {
     ? '<p class="subtitle" style="color:var(--warning)">⚠ Support Plan replaced — previous document dated ' + e(D.__mac_prev.generatedOn) + '. Check goals and approvals against the current Care Plan.</p>' : '';
   return `
   <div class="card print-page" data-cpdomain="mac">
-    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — My Aged Care Support Plan</strong>One Dream Community</div><div class="ph-ver">v0.3 · JAN 2026</div></div>
+    <div class="print-header"><img alt="ODC"/><div class="ph-meta"><strong>Care Plan — My Aged Care Support Plan</strong>One Dream Community</div></div>
     <div class="sec-head"><h2>My Aged Care Support Plan</h2><span class="ver-tag">${isNotice ? 'Assessment outcome (LTR003)' : 'Support Plan (REP001)'} · ${e(mac.generatedOn || mac.decisionDate || '')}</span></div>
     <p class="subtitle">Imported ${e(new Date(mac.parsedAt || Date.now()).toLocaleDateString('en-AU'))} · Aged Care ID <strong>${e((mac.client || {}).acId || D.p_mac_id || '—')}</strong> · assessed ${e(mac.assessedOn || '—')}${mac.assessor ? ' by ' + e(mac.assessor) : ''}${mac.assessorOrg ? ' (' + e(mac.assessorOrg) + ')' : ''}</p>
     ${draftBanner}${changed}
@@ -7742,6 +7772,118 @@ window.ODC_DOC = (function() {
   return { build: build };
 })();
 
+/* ---------- Print snapshot → PDF service (v2.9) ----------
+   Builds a self-contained copy of the page exactly as the Print Bundle shows it
+   (same stylesheet, print filter, expanded fields, signature images) and sends
+   it to the Azure Function in ODC_CLOUD_CONFIG.pdfService, which renders it
+   with headless Chromium and returns the PDF. */
+window.ODC_SNAPSHOT = (function() {
+  function esc(s) { return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;'); }
+
+  // Which print items make up each document kind (mirrors the Print picker groups)
+  function selectionFor(kind, items) {
+    const sel = {};
+    items.forEach(function(it) {
+      const k = it.key;
+      if (kind === 'care') { if (k.indexOf('cp_') === 0) sel[k] = true; }
+      else if (kind === 'interim') { if (k === 'interim_cp') sel[k] = true; }
+      else if (kind === 'initial') { if (k === 'initial' || k.indexOf('ax_') === 0) sel[k] = true; }
+      else if (kind === 'assessment') { if (k === 'annual' || k === 'initial' || k.indexOf('ax_') === 0) sel[k] = true; }
+    });
+    return sel;
+  }
+
+  // Copy live form values into attributes so they survive cloneNode()
+  function bakeValues(root) {
+    root.querySelectorAll('input').forEach(function(el) {
+      const t = (el.getAttribute('type') || 'text').toLowerCase();
+      if (t === 'checkbox' || t === 'radio') { if (el.checked) el.setAttribute('checked', ''); else el.removeAttribute('checked'); }
+      else if (t !== 'file') el.setAttribute('value', el.value);
+    });
+    root.querySelectorAll('select').forEach(function(el) {
+      Array.prototype.forEach.call(el.options, function(o) { if (o.selected) o.setAttribute('selected', ''); else o.removeAttribute('selected'); });
+    });
+    root.querySelectorAll('textarea').forEach(function(el) { el.textContent = el.value; });
+  }
+
+  async function build(kind, useLastSelection) {
+    if ((state.mode === 'new' || state.mode === 'annual') && state.currentStep !== 'careplan' && typeof renderCarePlan === 'function') renderCarePlan();
+    const items = buildPrintItems();
+    const stored = (useLastSelection && state.printSelection && Object.keys(state.printSelection).length) ? state.printSelection : null;
+    const sel = stored || selectionFor(kind, items);
+    const chosen = items.filter(function(i) { return i.target && sel[i.key]; });
+    if (!chosen.length) return { count: 0, labels: [], html: '' };
+
+    // Stage the live page the way executePrint() does, clone it, then undo.
+    const prevActive = {};
+    document.querySelectorAll('.step-panel').forEach(function(p) { prevActive[p.dataset.step] = p.classList.contains('active'); p.classList.add('active'); });
+    const prevInclude = Array.prototype.slice.call(document.querySelectorAll('.print-include'));
+    prevInclude.forEach(function(el) { el.classList.remove('print-include'); });
+    chosen.forEach(function(it) { it.target.classList.add('print-include'); });
+    document.body.classList.add('print-filter');
+    const imgPromises = (typeof syncSignaturePrintImages === 'function') ? syncSignaturePrintImages() : [];
+    await Promise.race([Promise.all(imgPromises), new Promise(function(r) { setTimeout(r, 400); })]);
+    bakeValues(document);
+    let html = '';
+    try {
+      const clone = document.documentElement.cloneNode(true);
+      // Strip scripts, overlays and dialogs; keep stylesheets and fonts
+      clone.querySelectorAll('script, noscript, #cloudLoginOverlay, .modal-bg, #spSaveModal, #printPicker, #modePicker, [id$="ImportBg"], .no-print, .sig-tools, canvas.sig-canvas').forEach(function(n) { n.remove(); });
+      clone.querySelectorAll('[data-sigwrap]').forEach(function(w) { const img = w.querySelector('.sig-print-img'); if (img && !img.getAttribute('src')) img.remove(); });
+      const body = clone.querySelector('body');
+      body.className = (body.className + ' print-filter print-expanded pdf-service').replace(/\s+/g, ' ');
+      body.removeAttribute('style');
+      const style = clone.ownerDocument.createElement('style');
+      style.textContent = [
+        // Screen-only chrome and everything the print filter hides
+        'html, body { background: #fff !important; }',
+        'body.pdf-service .topbar, body.pdf-service .toolbar, body.pdf-service nav, body.pdf-service .stepper, body.pdf-service .nav-row, body.pdf-service .step-meta, body.pdf-service .page-head { display: none !important; }',
+        // Textareas grow to their content (Chromium 123+), like expandFieldsForPrint()
+        'body.pdf-service textarea { field-sizing: content !important; height: auto !important; min-height: 36px !important; overflow: hidden !important; resize: none !important; }',
+        'body.pdf-service .step-panel { display: block !important; }',
+        'body.pdf-service #appMain { display: block !important; }'
+      ].join('\n');
+      clone.querySelector('head').appendChild(style);
+      // <base> so any relative URL (none expected) resolves against the app
+      const base = clone.ownerDocument.createElement('base'); base.href = location.origin + location.pathname;
+      clone.querySelector('head').insertBefore(base, clone.querySelector('head').firstChild);
+      html = '<!DOCTYPE html>\n' + clone.outerHTML;
+    } finally {
+      document.body.classList.remove('print-filter');
+      chosen.forEach(function(it) { it.target.classList.remove('print-include'); });
+      prevInclude.forEach(function(el) { el.classList.add('print-include'); });
+      document.querySelectorAll('.step-panel').forEach(function(p) { p.classList.toggle('active', !!prevActive[p.dataset.step]); });
+    }
+    return { count: chosen.length, labels: chosen.map(function(i) { return i.label; }), html: html };
+  }
+
+  function configured() {
+    const c = window.ODC_CLOUD_CONFIG && ODC_CLOUD_CONFIG.pdfService;
+    return !!(c && c.url);
+  }
+
+  async function render(html, fileName) {
+    const c = ODC_CLOUD_CONFIG.pdfService;
+    const token = await ODC_CLOUD.getTokenFor([c.scope]);
+    const r = await fetch(c.url, {
+      method: 'POST',
+      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ html: html, fileName: fileName || 'document.pdf' })
+    });
+    if (!r.ok) {
+      let msg = 'PDF service error ' + r.status;
+      try { const j = await r.json(); if (j && j.error) msg += ' — ' + j.error; } catch (e) {}
+      throw new Error(msg);
+    }
+    const blob = await r.blob();
+    const head = new Uint8Array(await blob.slice(0, 5).arrayBuffer());
+    if (String.fromCharCode.apply(null, head) !== '%PDF-') throw new Error('The PDF service did not return a PDF.');
+    return blob;
+  }
+
+  return { build: build, render: render, configured: configured, selectionFor: selectionFor };
+})();
+
 /* ---------- "Save to client folder" dialog ---------- */
 window.ODC_FILES_UI = (function() {
   const $ = function(id) { return document.getElementById(id); };
@@ -7893,9 +8035,11 @@ window.ODC_FILES_UI = (function() {
   async function showSave() {
     const l = link();
     dest = null;
-    $('spIntro').textContent = fromPrint
-      ? 'Saved the PDF from the print window? Drop it below and it is filed in the client’s folder.'
-      : 'Print → “Save as PDF”, then drop the PDF below. It is filed in the client’s folder with the standard name.';
+    $('spIntro').textContent = ODC_SNAPSHOT.configured()
+      ? 'Choose the document and press the button — the PDF is created and filed in the client’s folder with the standard name.'
+      : (fromPrint
+        ? 'Saved the PDF from the print window? Drop it below and it is filed in the client’s folder.'
+        : 'Print → “Save as PDF”, then drop the PDF below. It is filed in the client’s folder with the standard name.');
     $('spBody').innerHTML =
       '<div class="sp-row"><span class="lbl">Client folder</span><span class="val">' +
         (l.folderUrl ? '<a href="' + h(l.folderUrl) + '" target="_blank" rel="noopener">' + h(l.folderName) + '</a>' : h(l.folderName)) +
@@ -7907,8 +8051,12 @@ window.ODC_FILES_UI = (function() {
       '<div class="sp-row"><span class="lbl">Save into</span><span class="val" id="spDest">Finding the folder…</span>' +
         '<button class="sp-link" id="spDestChange">Change</button></div>' +
       '<div class="sp-row"><span class="lbl">File name</span><span class="val"><input type="text" id="spName" value="' + h(defaultName(kind)) + '"/></span><span></span></div>' +
-      '<div class="sp-drop" id="spDrop"><strong>Drop the saved PDF here</strong><span>or click to choose it from your computer</span></div>' +
-      '<div class="sp-auto">No PDF yet? <button class="sp-link" id="spAuto">Create one automatically (trial)</button> — skips the print window, but the layout is plainer than the printed version. Check the result before relying on it.</div>';
+      (ODC_SNAPSHOT.configured()
+        ? '<button type="button" class="btn" id="spMake" style="width:100%;margin-top:14px;padding:12px">⚡ Create the PDF and save it to the folder</button>' +
+          '<div class="sp-auto">Same layout as Print → Save as PDF, no print window. Or drop a PDF you saved yourself:</div>' +
+          '<div class="sp-drop" id="spDrop" style="margin-top:8px;padding:12px 16px"><strong>Drop a saved PDF here</strong><span>or click to choose it from your computer</span></div>'
+        : '<div class="sp-drop" id="spDrop"><strong>Drop the saved PDF here</strong><span>or click to choose it from your computer</span></div>' +
+          '<div class="sp-auto">No PDF yet? <button class="sp-link" id="spAuto">Create one automatically (trial)</button> — skips the print window, but the layout is plainer than the printed version. Check the result before relying on it.</div>');
 
     $('spRelink').onclick = function() {
       if (!confirm('Link this client to a different SharePoint folder?')) return;
@@ -7932,7 +8080,8 @@ window.ODC_FILES_UI = (function() {
       const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
       if (f) saveFile(f);
     };
-    $('spAuto').onclick = autoCreate;
+    if ($('spAuto')) $('spAuto').onclick = autoCreate;
+    if ($('spMake')) $('spMake').onclick = makeAndSave;
     status('', '');
     loadDest();
   }
@@ -7976,7 +8125,7 @@ window.ODC_FILES_UI = (function() {
     busy = b;
     const drop = $('spDrop');
     if (drop) drop.style.opacity = b ? '.5' : '';
-    ['spAuto', 'spKind', 'spName', 'spDestChange', 'spRelink'].forEach(function(id) { if ($(id)) $(id).disabled = b; });
+    ['spAuto', 'spMake', 'spKind', 'spName', 'spDestChange', 'spRelink'].forEach(function(id) { if ($(id)) $(id).disabled = b; });
   }
 
   // Uploads a PDF (dropped by the user, or made by the trial converter).
@@ -8014,6 +8163,25 @@ window.ODC_FILES_UI = (function() {
     try { await saveBlob(file, ''); }
     catch (err) { console.error('Save to client folder failed:', err); status('err', 'Not saved. ' + errText(err)); }
     finally { setBusy(false); }
+  }
+
+  // v2.9 — render the print view with the PDF service and file it (one click)
+  async function makeAndSave() {
+    if (busy) return;
+    if (!dest) { status('err', 'The destination folder is not ready yet — wait a moment and try again.'); return; }
+    setBusy(true);
+    try {
+      status('info', 'Preparing the document…');
+      const snap = await ODC_SNAPSHOT.build(kind, fromPrint);
+      if (!snap.count) { status('err', 'There is nothing to put in the document yet — complete the ' + KIND_LABEL[kind].toLowerCase() + ' first.'); return; }
+      status('info', 'Creating the PDF (' + snap.count + ' form' + (snap.count === 1 ? '' : 's') + ': ' + h(snap.labels.slice(0, 4).join(', ')) + (snap.labels.length > 4 ? '…' : '') + ')… usually 5–15 seconds.');
+      const name = ODC_FILES.safeFileName($('spName').value, 'pdf');
+      const blob = await ODC_SNAPSHOT.render(snap.html, name);
+      await saveBlob(blob, '');
+    } catch (err) {
+      console.error('PDF service failed:', err);
+      status('err', 'The PDF could not be created. ' + errText(err) + '<br>Use Print → “Save as PDF” and drop the file above instead.');
+    } finally { setBusy(false); }
   }
 
   // TRIAL — build a plain document from the selected forms and let SharePoint make the PDF.
