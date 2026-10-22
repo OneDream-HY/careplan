@@ -18,8 +18,14 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.0 (21 Oct 2026)
+     APP VERSION: v3.1 (23 Oct 2026)
      Version history:
+       v3.1 — Initial Ax → Care Plan: the assessment content that builds the
+              Interim Care Plan is now also written into each Care Plan domain's
+              "Care needs, choice and preferences" (live until staff edit the
+              field; __cp_auto). "Import last year's forms" stays open after
+              applying so forms can be imported one after another; choosing a
+              new file resets the reader; imported files accumulate in __legacy.
        v3.0 — "📂 Import last year's forms": reads the ODC fillable PDF forms used
               before this app (Care Plan v0.1, FRAT, Pain, Speech/Communication,
               Mobility, Personal Hygiene, Comprehensive Health, Nutrition) from
@@ -1205,7 +1211,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.0</span>
+    <span class="badge">Cloud · v3.1</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1784,7 +1790,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.0"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.1"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -4253,6 +4259,7 @@ function buildCarePlan() {
 
 function renderCarePlan() {
   const root = document.getElementById('careplanContent');
+  try { if (state.mode === 'new') prefillInterimFromInitial(); prefillCarePlanFromInitial(); } catch (e) {}
   root.innerHTML = buildCarePlan();
   bindFields(root);
   applyState(root);
@@ -4902,11 +4909,80 @@ function prefillInterimFromInitial() {
   ]));
 }
 
-// Rebuild the Interim CP whenever Initial Ax data changes (new clients only).
+
+/* ---------- CARE PLAN auto-fill from the Initial Assessment (v3.1) ----------
+   The same assessment content that builds the Interim Care Plan is written into
+   each Care Plan domain's "Care needs, choice and preferences" field so staff
+   never type it twice. Same LIVE rule as the Interim CP: a cp_*_needs field keeps
+   following the Initial Ax / Interim CP until someone edits it by hand
+   (tracked in __cp_auto) — after that their wording is left alone. */
+const CP_AUTO_MAP = {
+  nutrition:     ['icp_nutrition'],
+  hygiene:       ['icp_hygiene'],
+  mobility:      ['icp_mobility'],
+  continence:    ['icp_continence'],
+  behaviour:     ['icp_mental', 'icp_behaviour'],
+  cognition:     ['icp_cognition'],
+  communication: ['icp_comm', 'icp_speech', 'icp_vision', 'icp_hearing', 'icp_comm_general'],
+  home:          ['icp_home'],
+  social:        ['icp_social']
+};
+const CP_AUTO_LABELS = { icp_mental:'Mental health', icp_behaviour:'Behaviour', icp_comm:'', icp_speech:'Speech', icp_vision:'Vision', icp_hearing:'Hearing', icp_comm_general:'' };
+function prefillCarePlanFromInitial() {
+  const D = state.data;
+  if (!D) return;
+  const auto = D.__cp_auto = D.__cp_auto || {};
+  function V(k) { const v = D[k]; if (v == null || v === false) return ''; if (v === true) return 'Yes'; return Array.isArray(v) ? v.join(', ') : String(v).trim(); }
+  function first() { for (let i = 0; i < arguments.length; i++) { const v = V(arguments[i]); if (v) return v; } return ''; }
+  function compose(parts) {
+    return parts.map(function (p) { const v = first.apply(null, p.k); return v ? (p.l ? p.l + ': ' + v : v) : ''; }).filter(Boolean).join('\n');
+  }
+  function setAuto(key, val) {
+    if (val && val.indexOf('\n') < 0 && val.indexOf('Notes: ') === 0) val = val.slice(7); // single note line — no label needed
+    const cur = D[key] == null ? '' : String(D[key]);
+    const isAuto = !cur.trim() || cur === auto[key];
+    if (!isAuto) return;                       // staff wording — leave alone
+    if (!val) { if (cur && cur === auto[key]) { D[key] = ''; delete auto[key]; } return; }
+    if (cur !== val) { D[key] = val; }
+    auto[key] = val;
+  }
+  // 1:1 domains — take the Interim CP wording (already auto-built from the Initial Ax, or RN-edited)
+  Object.keys(CP_AUTO_MAP).forEach(function (dom) {
+    const txt = CP_AUTO_MAP[dom].map(function (k) {
+      const v = V(k); if (!v) return '';
+      const l = CP_AUTO_LABELS[k]; return l ? l + ': ' + v : v;
+    }).filter(Boolean).join('\n');
+    setAuto('cp_' + dom + '_needs', txt);
+  });
+  // Domains the Interim CP groups into one "complex" line — split back out
+  setAuto('cp_skin_needs', compose([{l:'Skin issue', k:['ia_skinIssue']}, {l:'Pressure injury risk', k:['ia_pressureInjuryRisk']}, {l:'Skin tear', k:['ia_skinTear']}, {l:'Active wound', k:['ia_woundActive']}, {l:'Management', k:['skin_management']}, {l:'Locations', k:['skin_locations']}, {l:'Wound', k:['wound_location']}, {l:'Notes', k:['ia_skin_notes','skin_notes']}]));
+  setAuto('cp_medication_needs', compose([{l:'Medications', k:['med_meds']}, {l:'Assistance', k:['ia_med_assist','med_assist']}, {l:'Assisted by', k:['med_assist_by']}, {l:'Polypharmacy', k:['ia_polypharmacy','med_polypharmacy']}, {l:'Anticoagulant', k:['ia_anticoagulant','med_anticoag']}, {l:'Allergies', k:['med_allergies_summary','med_allergies']}, {l:'Notes', k:['ia_med_notes','med_notes']}]));
+  setAuto('cp_pain_needs', compose([{l:'Pain', k:['ia_pain_yes']}, {l:'Chronic pain', k:['ia_chronicPain']}, {l:'Relief', k:['pain_relief']}, {l:'Strategies', k:['pain_strategies']}, {l:'Treatment', k:['pain_treatment']}, {l:'Notes', k:['ia_pain_notes']}]));
+  setAuto('cp_diabetes_needs', compose([{l:'Diabetes', k:['ia_diabetes']}, {l:'Insulin', k:['ia_insulin']}, {l:'Diabetic plan', k:['med_diabetic_plan']}, {l:'Notes', k:['ia_diabetes_notes']}]));
+  setAuto('cp_catheter_needs', compose([{l:'Catheter / stoma', k:['ia_catheter']}, {l:'Support', k:['cont_support']}, {l:'Notes', k:['ia_continence_notes']}]));
+  setAuto('cp_enteral_needs', compose([{l:'PEG / NG feeding', k:['ia_pegFeeding']}, {l:'Type', k:['nu_enteral_type']}, {l:'Mode', k:['nu_enteral_mode']}, {l:'Formula', k:['nu_enteral_name']}]));
+  setAuto('cp_palliative_needs', compose([{l:'Palliative', k:['ia_palliative']}, {l:'Terminal illness', k:['med_terminal']}, {l:'ACD', k:['acd_have']}, {l:'ACD notes', k:['acd_notes']}]));
+  // Client preference / risk alert → first domain's DOR detail stays untouched; allergies & preference go to the snapshot already.
+}
+function cpAutoRefreshFields() {
+  // push auto-filled values into any rendered Care Plan textareas
+  const root = document.getElementById('careplanContent');
+  if (!root || !state.data) return;
+  Object.keys(state.data).forEach(function (k) {
+    if (k.indexOf('cp_') !== 0 || !/_needs$/.test(k)) return;
+    const el = root.querySelector('[data-key="' + k + '"]');
+    if (el && el.value !== (state.data[k] || '')) el.value = state.data[k] || '';
+  });
+}
+
+// Rebuild the Interim CP (and the Care Plan 'care needs' fields) whenever Initial Ax data changes.
 function autoBuildInterim(changedKey) {
-  if (state.mode === 'new' && (!changedKey || String(changedKey).indexOf('icp_') !== 0)) {
+  const ck = changedKey == null ? '' : String(changedKey);
+  if (ck.indexOf('cp_') === 0) return;
+  if (state.mode === 'new' && ck.indexOf('icp_') !== 0) {
     try { prefillInterimFromInitial(); } catch (e) {}
   }
+  try { prefillCarePlanFromInitial(); cpAutoRefreshFields(); } catch (e) {}
 }
 
 function renderInterimForPrint() {
@@ -6776,7 +6852,8 @@ window.ODC_LEGACY = (function () {
     mapped.forEach(function (m) {
       Object.keys(m.set).forEach(function (k) {
         if (k === '__risk0') { if (!Array.isArray(D.cp_risks)) D.cp_risks = []; const blank = D.cp_risks.filter(function (r) { return (r.risk || '').trim() || (r.action || '').trim(); }).length === 0; if (blank) { D.cp_risks = [m.set.__risk0]; n++; } return; }
-        if (empty(D[k])) { D[k] = m.set[k]; filled[k] = m.set[k]; n++; }
+        const autoCp = D.__cp_auto && D.__cp_auto[k] != null && D.__cp_auto[k] === D[k]; // auto-filled from Initial Ax — last year's form wins
+        if (empty(D[k]) || autoCp) { D[k] = m.set[k]; filled[k] = m.set[k]; if (autoCp) delete D.__cp_auto[k]; n++; }
       });
       Object.keys(m.add).forEach(function (k) {
         if (empty(D[k])) { D[k] = m.add[k].slice(); filled[k] = D[k].slice(); n++; }
@@ -6874,11 +6951,22 @@ function legacyApplyTags() {
       '<div style="margin-bottom:12px"><span style="font-size:11px;text-transform:uppercase;letter-spacing:.02em;color:var(--ink-muted);font-weight:600">Method 0 — SharePoint</span><br/><button type="button" class="mini-btn" id="lgSpFind" style="margin-top:4px">🔍 Find this client’s forms on SharePoint</button><div id="lgSpList" style="margin-top:6px;max-height:200px;overflow-y:auto"></div></div>' +
       '<label class="field" style="display:block;margin-bottom:10px"><span>Method 1 — PDF files (select several at once)</span><input type="file" id="lgPdf" accept="application/pdf" multiple/></label>' +
       '<div id="lgPreview"></div>' +
-      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button type="button" class="btn ghost" id="lgCancel">Cancel</button><button type="button" class="btn" id="lgGo">Read forms</button></div></div>';
+      '<div id="lgDone" style="display:none;margin-top:10px;padding:8px 10px;border-radius:6px;background:var(--accent-light);font-size:12.5px"></div>' +
+      '<div style="display:flex;gap:8px;justify-content:flex-end;margin-top:12px"><button type="button" class="btn ghost" id="lgCancel">Close</button><button type="button" class="btn" id="lgGo">Read forms</button></div></div>';
     document.body.appendChild(bg);
     bg.querySelector('#lgCancel').addEventListener('click', function () { bg.remove(); });
     bg.addEventListener('click', function (e) { if (e.target === bg) bg.remove(); });
     let spItems = [];
+    let parsed = null;
+    // Picking a different file (or ticking another SharePoint form) after a read starts a fresh read —
+    // the button goes back to "Read forms" so several forms can be imported one after another.
+    function resetRead() {
+      parsed = null;
+      const go = bg.querySelector('#lgGo'); if (go) { go.disabled = false; go.textContent = 'Read forms'; }
+      const pv = bg.querySelector('#lgPreview'); if (pv) pv.innerHTML = '';
+    }
+    bg.querySelector('#lgPdf').addEventListener('change', resetRead);
+    bg.querySelector('#lgSpList').addEventListener('change', resetRead);
     bg.querySelector('#lgSpFind').addEventListener('click', async function () {
       const fb = bg.querySelector('#lgSpFind'), listEl = bg.querySelector('#lgSpList');
       fb.disabled = true; fb.textContent = 'Searching SharePoint…';
@@ -6892,10 +6980,9 @@ function legacyApplyTags() {
       fb.disabled = false; fb.textContent = '🔍 Find this client’s forms on SharePoint';
     });
 
-    let parsed = null;
     bg.querySelector('#lgGo').addEventListener('click', async function () {
       const go = bg.querySelector('#lgGo');
-      if (parsed) { applyAll(parsed, bg); return; }
+      if (parsed) { applyAll(parsed, bg); resetRead(); return; }
       go.disabled = true; go.textContent = 'Reading…';
       try {
         const sources = [];
@@ -6939,8 +7026,10 @@ function legacyApplyTags() {
     use.sort(function (a, b) { return (a.mapped.template === 'careplan' ? 0 : 1) - (b.mapped.template === 'careplan' ? 0 : 1); });
     const n = ODC_LEGACY.apply(use.map(function (r) { return r.mapped; }), state.data);
     use.forEach(function (r) { (r.mapped.tools || []).forEach(function (t) { state.selectedTools[t] = true; state.manualTools[t] = true; }); });
-    state.data.__legacy = { at: Date.now(), files: use.map(function (r) { return { name: r.name, template: r.mapped.template, date: r.mapped.date || '', count: r.mapped.count }; }) };
-    bg.remove();
+    // accumulate across several imports (one form at a time is fine)
+    const prev = (state.data.__legacy && Array.isArray(state.data.__legacy.files)) ? state.data.__legacy.files : [];
+    const added = use.map(function (r) { return { name: r.name, template: r.mapped.template, date: r.mapped.date || '', count: r.mapped.count }; });
+    state.data.__legacy = { at: Date.now(), files: prev.filter(function (f) { return !added.some(function (a) { return a.name === f.name; }); }).concat(added) };
     ['initialContent', 'annualContent', 'careplanContent'].forEach(function (id) { const el = document.getElementById(id); if (el && el.children.length) applyState(el); });
     if (typeof renderToolsList === 'function') renderToolsList();
     if (typeof renderAxBlocks === 'function') renderAxBlocks();
@@ -6948,7 +7037,17 @@ function legacyApplyTags() {
     if (typeof renderAnnualAdjuncts === 'function') try { renderAnnualAdjuncts(); } catch (e) {}
     legacyApplyTags();
     autoSave();
-    alert(n + ' field(s) filled from ' + use.length + ' form(s).\n\nReview each blue-tagged field — edit it (or leave it) and the tag clears once the value changes.');
+    // Stay open so the next form can be imported straight away; clear the chooser for the next one.
+    const done = bg.querySelector('#lgDone');
+    if (done) {
+      done.style.display = 'block';
+      let list = done.querySelector('.lg-list');
+      if (!list) { done.innerHTML = '<div class="lg-list"></div><div style="margin-top:4px;color:var(--ink-muted)">Blue-tagged fields are for review — the tag clears once you edit the value. Choose the next form above, or Close.</div>'; list = done.querySelector('.lg-list'); }
+      list.innerHTML += '<div>✓ <strong>' + n + '</strong> field(s) filled from ' + use.map(function (r) { return _macEsc(r.mapped.label) + ' <small style="color:var(--ink-muted)">(' + _macEsc(r.name) + ')</small>'; }).join(', ') + '</div>';
+    }
+    const inp = bg.querySelector('#lgPdf'); if (inp) inp.value = '';
+    bg.querySelectorAll('[data-lgsp]:checked').forEach(function (cb) { cb.checked = false; });
+    const pv = bg.querySelector('#lgPreview'); if (pv) pv.innerHTML = '';
   }
 
   btns.forEach(function (b) { b.addEventListener('click', openModal); });
