@@ -18,8 +18,12 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.1 (23 Oct 2026)
+     APP VERSION: v3.2 (30 Oct 2026)
      Version history:
+       v3.2 — Print picker: each section heading (e.g. "Care Plan") has its own
+              tick that selects / clears every form in that section. Budget import: the "Updated dd/mm/yyyy" stamp
+              now uses the Date printed on the Package Overview (the day the
+              changed budget starts), not the day the PDF was downloaded.
        v3.1 — Initial Ax → Care Plan: the assessment content that builds the
               Interim Care Plan is now also written into each Care Plan domain's
               "Care needs, choice and preferences" (live until staff edit the
@@ -1211,7 +1215,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.1</span>
+    <span class="badge">Cloud · v3.2</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1790,7 +1794,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.1"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.2"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -5231,20 +5235,32 @@ function openPrintPicker() {
   items.forEach(i => { (groups[i.group] = groups[i.group] || []).push(i); });
   const stored = (state.printSelection && Object.keys(state.printSelection).length) ? state.printSelection : null;
   root.innerHTML = Object.keys(groups).map(g => `
-    <div class="prt-section-head">${g}</div>
+    <label class="prt-section-head" style="display:flex;align-items:center;gap:8px;cursor:pointer"><input type="checkbox" data-pg="${g}" ${(stored ? groups[g].every(it => !!stored[it.key]) : true) ? 'checked' : ''}/><span>${g}</span><span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--ink-muted);font-size:11px">— tick to select the whole section</span></label>
     ${groups[g].map((it, i) => {
       const checked = stored ? !!stored[it.key] : true;
       return `<label class="prt-row ${checked?'checked':''}"><input type="checkbox" data-pk="${it.key}" ${checked?'checked':''}/><span class="prt-label">${it.label}</span><span class="prt-meta">${it.meta}</span></label>`;
     }).join('')}
   `).join('');
   function updateCount() {
-    const n = root.querySelectorAll('input[type="checkbox"]:checked').length;
-    const total = root.querySelectorAll('input[type="checkbox"]').length;
+    const n = root.querySelectorAll('input[data-pk]:checked').length;
+    const total = root.querySelectorAll('input[data-pk]').length;
     document.getElementById('prtCount').textContent = `${n} of ${total} selected`;
   }
+  // Section tick (e.g. "Care Plan") selects / clears every form in that section
+  function syncGroupTicks() {
+    root.querySelectorAll('input[data-pg]').forEach(h => {
+      const keys = (groups[h.dataset.pg] || []).map(it => it.key);
+      h.checked = keys.length > 0 && keys.every(k => { const c = root.querySelector('input[data-pk="' + k + '"]'); return c && c.checked; });
+    });
+  }
+  root.querySelectorAll('input[data-pg]').forEach(h => h.addEventListener('change', () => {
+    (groups[h.dataset.pg] || []).forEach(it => { const c = root.querySelector('input[data-pk="' + it.key + '"]'); if (c) { c.checked = h.checked; c.closest('.prt-row').classList.toggle('checked', h.checked); } });
+    updateCount();
+  }));
   // bind toggle visual + count
   root.querySelectorAll('.prt-row input').forEach(c => c.addEventListener('change', e => {
     e.target.closest('.prt-row').classList.toggle('checked', e.target.checked);
+    syncGroupTicks();
     updateCount();
   }));
   updateCount();
@@ -5325,7 +5341,7 @@ function executePrint() {
   const items = buildPrintItems();
   const itemsByKey = {}; items.forEach(i => itemsByKey[i.key] = i);
   const checked = {};
-  document.querySelectorAll('#printList input[type="checkbox"]').forEach(c => {
+  document.querySelectorAll('#printList input[data-pk]').forEach(c => {
     if (c.checked) checked[c.dataset.pk] = true;
   });
   if (Object.keys(checked).length === 0) {
@@ -5483,11 +5499,17 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
   }
   window.ODC_BUDGET = { domainsFor: budgetDomainsFor, DOMAINS: BUDGET_DOMAINS };
 
+  // The "Updated" stamp carries the budget's own date (the "Date" on the Package
+  // Overview = the day the changed budget starts), not the day the PDF was downloaded.
+  function budgetStampDate(b) {
+    const m = String((b && b.date) || '').match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (m) return m[1].padStart(2, '0') + '/' + m[2].padStart(2, '0') + '/' + m[3];
+    return todayDMY();
+  }
   function buildSummary(b, lines) {
-    const today = todayDMY();
     const L = [];
     (lines || b.services || []).forEach(function(sv) { L.push(sv); });
-    L.push('Updated ' + today);
+    L.push('Updated ' + budgetStampDate(b));
     return L.join('\n');
   }
 
@@ -5622,7 +5644,7 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
           }
         }
         // Place every budgeted service into the domain(s) on the RN's list
-        const today = todayDMY();
+        const today = budgetStampDate(b);
         const perDom = {}, unplaced = [];
         (b.services || []).forEach(function(sv) {
           const nm = sv.replace(/^[•\s]+/, '').split(' \u2014 ')[0];
@@ -7271,17 +7293,17 @@ function executeEmailCoordinator() {
 }
 document.getElementById('btnEmailCoord').addEventListener('click', executeEmailCoordinator);
 function updatePrintCount() {
-  const n = document.querySelectorAll('#printList input[type="checkbox"]:checked').length;
-  const total = document.querySelectorAll('#printList input[type="checkbox"]').length;
+  const n = document.querySelectorAll('#printList input[data-pk]:checked').length;
+  const total = document.querySelectorAll('#printList input[data-pk]').length;
   const el = document.getElementById('prtCount');
   if (el) el.textContent = `${n} of ${total} selected`;
 }
 document.getElementById('btnPrintAll').addEventListener('click', () => {
-  document.querySelectorAll('#printList input[type="checkbox"]').forEach(c => { c.checked = true; c.closest('.prt-row').classList.add('checked'); });
+  document.querySelectorAll('#printList input[type="checkbox"]').forEach(c => { c.checked = true; const r = c.closest('.prt-row'); if (r) r.classList.add('checked'); });
   updatePrintCount();
 });
 document.getElementById('btnPrintNone').addEventListener('click', () => {
-  document.querySelectorAll('#printList input[type="checkbox"]').forEach(c => { c.checked = false; c.closest('.prt-row').classList.remove('checked'); });
+  document.querySelectorAll('#printList input[type="checkbox"]').forEach(c => { c.checked = false; const r = c.closest('.prt-row'); if (r) r.classList.remove('checked'); });
   updatePrintCount();
 });
 document.getElementById('btnClear').addEventListener('click', () => {
