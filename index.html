@@ -18,8 +18,13 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.4 (9 Nov 2026)
+     APP VERSION: v3.4.1 (9 Nov 2026)
      Version history:
+       v3.4.1 — New-client Teams notice: primary path is now the Power Automate
+              flow "ODC CarePlan - New client agreement signed -> RNs" (fires
+              within a minute of the agreement record being saved as signed);
+              the login check stays as a safety net. Both share one marker per
+              record in Service Agreement Records/_rn-notified so nothing posts twice.
        v3.4 — Teams messages to the RNs channel (Graph ChannelMessage.Send):
               new client when a Service Agreement is signed (login check +
               marker file), "Hand over to RN" button on the Initial / Annual
@@ -1247,7 +1252,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.4</span>
+    <span class="badge">Cloud · v3.4.1</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1831,7 +1836,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.4"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.4.1"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -7497,7 +7502,7 @@ window.ODC_AI = (function () {
      3. Care Plan approved vN  (from ODC_APPROVAL.approve)
    Falls back to the Teams webhook (teamsWebhookUrl) if the channel post fails. */
 window.ODC_TEAMS = (function () {
-  const MARKER = '/drive/root:/careplan-rn-notified.json';
+  // (markers now live in the agreement records folder: _rn-notified/<file>.txt — see checkNewAgreements)
   const APP_URL = 'https://onedream-hy.github.io/careplan/';
   function cfg() { return (window.ODC_CLOUD_CONFIG || {}).rnChannel || {}; }
   function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
@@ -7555,29 +7560,34 @@ window.ODC_TEAMS = (function () {
     return send('Care Plan approved — ' + name + ' v' + ver, html);
   }
 
-  /* ---- 1. New signed agreements (login check, one device wins via the marker file) ---- */
+  /* ---- 1. New signed agreements (login check = safety net) ----
+     Primary path is the Power Automate flow "ODC CarePlan - New client agreement
+     signed -> RNs" (SharePoint trigger on Service Agreement Records). Both paths
+     share one marker per record: "_rn-notified/<record file>.txt" in that folder,
+     so whichever posts first blocks the other. The login check only looks at
+     records changed in the last 14 days and only fires once per device per day. */
   async function checkNewAgreements() {
     try {
-      if (!window.ODC_AGREEMENT || !window.ODC_CLOUD || !ODC_CLOUD.graph || !ODC_CLOUD.siteId || !cfg().teamId) return;
-      const since = Date.now() - 45 * 24 * 3600 * 1000;
+      if (!window.ODC_AGREEMENT || !ODC_AGREEMENT.markerExists || !window.ODC_CLOUD || !ODC_CLOUD.graph || !cfg().teamId) return;
+      const stampKey = 'odc_rn_newclient_check';
+      try { if ((Date.now() - (+localStorage.getItem(stampKey) || 0)) < 20 * 3600 * 1000) return; } catch (e) {}
+      const since = Date.now() - 14 * 24 * 3600 * 1000;
       const files = (await ODC_AGREEMENT.list()).filter(function (f) { return new Date(f.modified || 0).getTime() >= since; }).slice(0, 25);
-      if (!files.length) return;
-      let marker = { agreements: {} };
-      try { const m = await ODC_CLOUD.graph('/sites/' + ODC_CLOUD.siteId + MARKER + ':/content'); if (m && m.agreements) marker = m; } catch (e) {}
-      const todo = files.filter(function (f) { const k = marker.agreements[f.name]; return !k || (k.modified && k.modified !== f.modified && !k.signed); });
-      if (!todo.length) return;
-      let changed = false;
-      for (const f of todo.slice(0, 8)) {
+      try { localStorage.setItem(stampKey, String(Date.now())); } catch (e) {}
+      for (const f of files) {
         let info = null;
         try { const rr = await ODC_AGREEMENT.read({ id: f.id }); info = ODC_AGREEMENT.extract(rr.record, rr.meta); } catch (e) { continue; }
-        marker.agreements[f.name] = { modified: f.modified, signed: !!info.signed, at: new Date().toISOString() }; changed = true;
         if (!info.signed) continue;
+        try { if (await ODC_AGREEMENT.markerExists(f.name)) continue; } catch (e) { console.warn('marker check failed, skipping', f.name, e); continue; }
         const p = info.participant || {}; const a = info.agreement || {};
         const name = p.name || f.client;
         const html = '<p>🆕 <b>New client — Service Agreement signed</b></p><p><b>' + esc(name) + '</b>' + (a.variant || a.version ? ' · ' + esc([a.variant, a.version].filter(Boolean).join(' ')) : '') + (a.startDate ? '<br/>Service start: ' + esc(String(a.startDate).slice(0, 10)) : '') + (p.suburb ? '<br/>Suburb: ' + esc(p.suburb) : '') + '<br/>Agreement saved ' + (info.savedAt ? esc(String(info.savedAt).slice(0, 10)) : '') + (info.savedBy ? ' by ' + esc(String(info.savedBy).split('@')[0]) : '') + '</p><p>Initial Assessment and Care Plan to be started. In the CarePlan app use <b>Clients → Service Agreements</b> to open the client with the agreement details pre-filled.</p><p>' + link + '</p>';
-        try { await send('New client — ' + name, html); marker.agreements[f.name].notified = new Date().toISOString(); } catch (e) { console.warn('new-client notice failed', e); }
+        try {
+          // Write the marker first so a second device / the flow cannot post the same client twice.
+          await ODC_AGREEMENT.markNotified(f.name, 'RNs channel notified ' + new Date().toISOString() + ' by the CarePlan app (' + who() + ')');
+          await send('New client — ' + name, html);
+        } catch (e) { console.warn('new-client notice failed', e); }
       }
-      if (changed) await ODC_CLOUD.graph('/sites/' + ODC_CLOUD.siteId + MARKER + ':/content', { method: 'PUT', body: marker });
     } catch (e) { console.warn('checkNewAgreements skipped:', e); }
   }
 
@@ -10495,7 +10505,23 @@ window.ODC_AGREEMENT = (function() {
   }
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init); else init();
 
-  return { openPicker: openPicker, openForClient: openForClient, list: list, read: read, extract: extract, mapRows: mapRows, splitContact: splitContact, findCarePlans: findCarePlans };
+  /* ---------- RN-notified markers (shared with the Power Automate flow) ----------
+     One marker file per agreement record, "<record file name>.txt", in the
+     "_rn-notified" sub-folder of the agreement records folder. The Power Automate
+     flow "ODC CarePlan - New client agreement signed -> RNs" is the primary path
+     and writes the same markers, so whichever path posts first blocks the other. */
+  const MARK_FOLDER = AG.folder + '/_rn-notified';
+  async function markerExists(fileName) {
+    const d = await drive();
+    try { await G('/drives/' + d + '/root:/' + encPath(MARK_FOLDER + '/' + fileName + '.txt') + '?$select=id'); return true; }
+    catch (e) { if (/404|itemNotFound/i.test(String(e && e.message || e))) return false; throw e; }
+  }
+  async function markNotified(fileName, note) {
+    const d = await drive();
+    await G('/drives/' + d + '/root:/' + encPath(MARK_FOLDER + '/' + fileName + '.txt') + ':/content', { method: 'PUT', headers: { 'Content-Type': 'text/plain' }, body: new Blob([String(note || ('RNs channel notified ' + new Date().toISOString() + ' by the CarePlan app'))], { type: 'text/plain' }) });
+  }
+
+  return { openPicker: openPicker, openForClient: openForClient, list: list, read: read, extract: extract, mapRows: mapRows, splitContact: splitContact, findCarePlans: findCarePlans, markerExists: markerExists, markNotified: markNotified };
 })();
 </script>
 </body>
