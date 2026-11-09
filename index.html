@@ -18,8 +18,14 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.4.1 (9 Nov 2026)
+     APP VERSION: v3.4.2 (9 Nov 2026)
      Version history:
+       v3.4.2 — "Care Plan approved" also posted to the coordinators' channel
+              (AgedCare Team → General). On Approve the app writes one row per
+              client to the CarePlanReviews list (CarePlan site) with the 12-month
+              review date; the Power Automate flow "ODC CarePlan - Review due in
+              1 month" reads it each morning, alerts RNs + coordinators and puts
+              the review in the RNs team calendar.
        v3.4.1 — New-client Teams notice: primary path is now the Power Automate
               flow "ODC CarePlan - New client agreement signed -> RNs" (fires
               within a minute of the agreement record being saved as signed);
@@ -197,7 +203,12 @@
       scope: 'api://c47d2e17-f266-4271-80e6-46170c254ef4/Pdf.Render'
     },
     // v3.4 — RNs team → General channel (messages posted as the signed-in user via Graph ChannelMessage.Send)
-    rnChannel: { teamId: 'd6c52065-6f00-41bc-8bb2-5574c2f630c3', channelId: '19:3Ldx0RxPWSZEn9Z-S5E6yNrDRviVYwTibvA7esVMv0U1@thread.tacv2' }
+    rnChannel: { teamId: 'd6c52065-6f00-41bc-8bb2-5574c2f630c3', channelId: '19:3Ldx0RxPWSZEn9Z-S5E6yNrDRviVYwTibvA7esVMv0U1@thread.tacv2' },
+    // v3.4.2 — AgedCare Team → General: the coordinators' channel. "Care Plan approved" is posted here as well.
+    coordChannel: { teamId: 'b2fefc5d-bf08-4b65-a099-8c553836c033', channelId: '19:CY98uoZPtndQZURksCU4oyVjou5qupKfr1JrNdaapVw1@thread.tacv2' },
+    // v3.4.2 — SharePoint list on the CarePlan site: one row per client with the current approved plan and its
+    // 12-month review date. The Power Automate flow "ODC CarePlan - Review due in 1 month" reads it every morning.
+    reviewsListName: 'CarePlanReviews'
   };
 </script>
 
@@ -1252,7 +1263,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.4.1</span>
+    <span class="badge">Cloud · v3.4.2</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1836,7 +1847,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.4.1"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.4.2"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -7300,6 +7311,8 @@ window.ODC_APPROVAL = (function () {
     try {
       const nx = (function () { const t = new Date(now); t.setMonth(t.getMonth() + 12); return dmy(t.getTime()); })();
       if (window.ODC_TEAMS) ODC_TEAMS.approved(d, ver, nx).catch(function (e) { console.warn('approved notice failed', e); });
+      // v3.4.2 — review row for the daily "review due in 1 month" flow (RN + coordinator alert, RNs group calendar event)
+      if (window.ODC_TEAMS && ODC_TEAMS.recordApproval) { const rb = new Date(now); rb.setMonth(rb.getMonth() + 12); ODC_TEAMS.recordApproval(d, ver, now, rb.getTime()).catch(function (e) { console.warn('review row failed', e); }); }
       const hook = window.ODC_TEAMS ? '' : ((window.ODC_CLOUD_CONFIG || {}).teamsWebhookUrl || '').trim();
       if (hook) fetch(hook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'message', attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive', content: { '$schema': 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.4', body: [{ type: 'TextBlock', size: 'Large', weight: 'Bolder', text: '✅ Care Plan approved — ' + (d.p_name || d.p_preferred || 'client') }, { type: 'TextBlock', wrap: true, text: 'Version ' + ver + ' approved by **' + d.__cp_approved_by + '** on ' + dmy(now) + '. Next full review by ' + (function () { const t = new Date(now); t.setMonth(t.getMonth() + 12); return dmy(t.getTime()); })() + '.' }] } }] }) }).catch(function () {});
     } catch (e) {}
@@ -7510,8 +7523,8 @@ window.ODC_TEAMS = (function () {
   function user() { return (window.ODC_CLOUD && ODC_CLOUD.getUser && ODC_CLOUD.getUser()) || {}; }
   function who() { const u = user(); return u.name || u.email || 'ODC staff'; }
 
-  async function post(subject, html) {
-    const c = cfg();
+  async function post(subject, html, channel) {
+    const c = channel || cfg();
     if (!c.teamId || !c.channelId) throw new Error('RN channel not configured');
     const token = await ODC_CLOUD.getTokenFor(['https://graph.microsoft.com/ChannelMessage.Send']);
     const r = await fetch('https://graph.microsoft.com/v1.0/teams/' + c.teamId + '/channels/' + encodeURIComponent(c.channelId) + '/messages', {
@@ -7525,8 +7538,9 @@ window.ODC_TEAMS = (function () {
     const hook = ((window.ODC_CLOUD_CONFIG || {}).teamsWebhookUrl || '').trim(); if (!hook) return;
     await fetch(hook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'message', attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive', content: { '$schema': 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.4', body: [{ type: 'TextBlock', size: 'Large', weight: 'Bolder', text: title }, { type: 'TextBlock', wrap: true, text: text }] } }] }) });
   }
-  async function send(subject, html, plain) {
-    try { await post(subject, html); return 'channel'; }
+  function coordCfg() { return (window.ODC_CLOUD_CONFIG || {}).coordChannel || {}; }
+  async function send(subject, html, plain, channel) {
+    try { await post(subject, html, channel); return 'channel'; }
     catch (e) { console.warn('RN channel post failed, trying webhook:', e.message); try { await webhook(subject, plain || html.replace(/<[^>]+>/g, '')); return 'webhook'; } catch (e2) { throw e; } }
   }
   const link = '<a href="' + APP_URL + '">Open the CarePlan app</a>';
@@ -7557,7 +7571,13 @@ window.ODC_TEAMS = (function () {
   async function approved(D, ver, nextReview) {
     const name = D.p_name || D.p_preferred || 'client';
     const html = '<p>✅ <b>Care Plan approved — ' + esc(name) + '</b></p><p>Version ' + ver + ' approved by <b>' + esc(D.__cp_approved_by || who()) + '</b> on ' + dmy(D.__cp_approved_at) + '.<br/>Next full review by <b>' + esc(nextReview) + '</b> (earlier on hospital admission / discharge, new budget, new MAC Support Plan, change of carer or living arrangement, or client / family request).</p><p>The signed PDF is filed in the client\'s folder. ' + link + '</p>';
-    return send('Care Plan approved — ' + name + ' v' + ver, html);
+    const r = await send('Care Plan approved — ' + name + ' v' + ver, html);
+    // coordinators' channel too (v3.4.2) — they set up / adjust the services from the approved plan
+    if (coordCfg().teamId) {
+      const chtml = '<p>✅ <b>Care Plan approved — ' + esc(name) + '</b></p><p>Version ' + ver + ' approved by <b>' + esc(D.__cp_approved_by || who()) + '</b> on ' + dmy(D.__cp_approved_at) + '. Next review by <b>' + esc(nextReview) + '</b>.</p><p>Care Partner: please check the approved plan and set up / adjust the services and roster accordingly. The signed PDF is in the client\'s folder. ' + link + '</p>';
+      try { await post('Care Plan approved — ' + name + ' v' + ver, chtml, coordCfg()); } catch (e) { console.warn('coordinator channel post failed', e); }
+    }
+    return r;
   }
 
   /* ---- 1. New signed agreements (login check = safety net) ----
@@ -7615,7 +7635,33 @@ window.ODC_TEAMS = (function () {
       window.goTo.__teamsWrapped = true;
     }
   }
-  return { post: post, send: send, handover: handover, approved: approved, checkNewAgreements: checkNewAgreements, initButtons: initButtons };
+  /* ---- CarePlanReviews list: one row per client (v3.4.2) ---- */
+  let _reviewsListId = null;
+  async function reviewsList() {
+    if (_reviewsListId) return _reviewsListId;
+    const name = (window.ODC_CLOUD_CONFIG || {}).reviewsListName || 'CarePlanReviews';
+    const r = await ODC_CLOUD.graph('/sites/' + ODC_CLOUD.siteId + '/lists?$select=id,name,displayName');
+    const l = (r.value || []).find(function (x) { return x.name === name || x.displayName === name; });
+    if (!l) throw new Error('SharePoint list "' + name + '" not found on the CarePlan site');
+    _reviewsListId = l.id; return _reviewsListId;
+  }
+  async function recordApproval(D, ver, approvedAtMs, reviewByMs) {
+    if (!window.ODC_CLOUD || !ODC_CLOUD.graph || !ODC_CLOUD.siteId) return;
+    const lid = await reviewsList();
+    const clientId = (typeof activeClientId !== 'undefined' && activeClientId) || D.__client_id || '';
+    const name = D.p_name || D.p_preferred || 'client';
+    const iso = function (ms) { return new Date(ms).toISOString(); };
+    const fields = { Title: name, ClientId: String(clientId), ReviewBy: iso(reviewByMs).slice(0, 10), ApprovedAt: iso(approvedAtMs), ApprovedBy: String(D.__cp_approved_by || who()), Version: ver, AlertSent: false, EventId: '', Coordinator: String(D.p_coordinator || D.p_care_partner || '') };
+    let found = null;
+    if (clientId) {
+      try { const q = await ODC_CLOUD.graph('/sites/' + ODC_CLOUD.siteId + '/lists/' + lid + "/items?expand=fields($select=ClientId)&$filter=fields/ClientId eq '" + String(clientId).replace(/'/g, "''") + "'&$top=1", { headers: { Prefer: 'HonorNonIndexedQueriesWarningMayFailRandomly' } }); found = (q.value || [])[0] || null; } catch (e) { console.warn('reviews lookup failed', e); }
+    }
+    if (found) await ODC_CLOUD.graph('/sites/' + ODC_CLOUD.siteId + '/lists/' + lid + '/items/' + found.id + '/fields', { method: 'PATCH', body: fields });
+    else await ODC_CLOUD.graph('/sites/' + ODC_CLOUD.siteId + '/lists/' + lid + '/items', { method: 'POST', body: { fields: fields } });
+    return true;
+  }
+
+  return { post: post, send: send, handover: handover, approved: approved, recordApproval: recordApproval, checkNewAgreements: checkNewAgreements, initButtons: initButtons };
 })();
 try { ODC_TEAMS.initButtons(); } catch (e) {}
 
