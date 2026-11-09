@@ -18,8 +18,13 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.4.4 (9 Nov 2026)
+     APP VERSION: v3.4.5 (9 Nov 2026)
      Version history:
+       v3.4.5 — MAC Support Plan import removed (Hayley / Sue, 9 Nov 2026):
+              no "Import MAC Support Plan" button, nothing from the plan is
+              written into the Care Plan, the "My Aged Care Support Plan" page
+              and the short-term-approval banner are gone. Parser left dormant
+              for old records. "Generate care plan draft" = rules + AI only.
        v3.4.4 — MAC Support Plan import (Sue, 9 Nov): only the red "Your
               assessment summary" box is written into the Care Plan, each
               sub-heading to its category as the care need; goals, recommended
@@ -1279,7 +1284,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.4.4</span>
+    <span class="badge">Cloud · v3.4.5</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1811,7 +1816,6 @@ window.ODC_CLOUD = (function() {
         <p>Auto-generated from completed assessments. Edit any cell to refine. Identified risks and tool results from Step 2 are pre-filled below.</p>
         <div class="no-print" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
           <button type="button" class="btn ghost" data-legacy-import>📂 Import last year’s forms</button>
-          <button type="button" class="btn ghost" id="btnImportMac">📄 Import MAC Support Plan</button>
           <button type="button" class="btn ghost" id="btnImportBudget">🧾 Import package budget (PDF / paste)</button>
           <button type="button" class="btn" id="btnMacDraft">✨ Generate care plan draft</button>
           <button type="button" class="btn ghost" id="btnAiDraft" title="Azure OpenAI (Australia East) writes the free-text care-needs paragraph, one individualised intervention per domain and the preference summary — as DRAFT for the RN">🤖 AI free-text draft</button>
@@ -1861,7 +1865,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.4.4"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.4.5"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -4691,7 +4695,7 @@ function renderSavedClients() {
   // v2.8 — short-term AT / HM approvals (from the imported MAC Support Plan)
   // that have expired or expire within 90 days.
   const SOON = 90 * 24 * 3600 * 1000;
-  const stDue = Object.values(map).map(function(c) {
+  const stDue = (false ? Object.values(map) : []).map(function(c) { // v3.4.5: MAC import removed — banner off
     const mac = c.state && c.state.data && c.state.data.__mac;
     const st = (mac && mac.approvals && mac.approvals.shortTerm) || [];
     const groups = {};
@@ -6250,6 +6254,7 @@ function macCrossCheck(D) {
 
 /* ---- Printable summary page ---- */
 function macSummaryCard(D) {
+  return ''; // v3.4.5 — MAC Support Plan page removed from the Care Plan
   const mac = D.__mac;
   if (!mac) return '';
   const e = _macEsc;
@@ -6362,6 +6367,10 @@ function macAxPlan(mac, D) {
 
 /* ---- Draft generator ---- */
 function macGenerateDraft(D, opts) {
+  // v3.4.5 (Hayley/Sue, 9 Nov 2026): the MAC Support Plan is no longer read into the Care Plan at all.
+  // Goals / needs / interventions / aids / providers come from the assessments, the CareTok budget and the
+  // rule engine (ODC_RULES) plus the AI free-text draft. Parser code kept for old records only.
+  return [];
   opts = opts || {};
   const mac = D.__mac || {};
   const draft = D.__mac_draft = D.__mac_draft || {};
@@ -6425,9 +6434,9 @@ function macApplyDraftTags() {
 }
 
 (function initMacImport() {
-  const btnImport = document.getElementById('btnImportMac');
+  const btnImport = document.getElementById('btnImportMac'); // removed in v3.4.5 (null)
   const btnDraft = document.getElementById('btnMacDraft');
-  if (!btnImport || !btnDraft) return;
+  if (!btnDraft) return;
 
   async function spFindMacPdfs() {
     const driveId = await ODC_SPB.drive();
@@ -6557,9 +6566,6 @@ function macApplyDraftTags() {
   }
 
   function runDraft() {
-    if (!state.data.__mac) {
-      if (confirm('No MAC Support Plan has been imported for this client.\n\nImport one now? (Cancel = generate from the assessment and budget only.)')) { openModal(); return; }
-    }
     if (!document.querySelector('#careplanContent .cp-domain')) goTo('careplan');
     const written = macGenerateDraft(state.data, {});
     renderCarePlan();
@@ -6597,7 +6603,7 @@ function macApplyDraftTags() {
     finally { if (b) { b.disabled = false; b.textContent = label; } }
   };
 
-  btnImport.addEventListener('click', openModal);
+  if (btnImport) btnImport.addEventListener('click', openModal);
   btnDraft.addEventListener('click', runDraft);
 
   // DRAFT tags whenever the Care Plan is (re)rendered
