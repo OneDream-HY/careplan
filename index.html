@@ -18,8 +18,14 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.3 (9 Nov 2026)
+     APP VERSION: v3.4 (9 Nov 2026)
      Version history:
+       v3.4 — Teams messages to the RNs channel (Graph ChannelMessage.Send):
+              new client when a Service Agreement is signed (login check +
+              marker file), "Hand over to RN" button on the Initial / Annual
+              Assessment, Care Plan approved. AI free-text draft runs by itself
+              the first time an RN opens a client's Care Plan. NO FUNDED SERVICE
+              flag limited to domains that carry budget services.
        v3.3 — Care Plan auto-generation (rules confirmed by QA 9 Nov 2026):
               ODC_RULES detects each domain's level from the assessments and
               budget and writes the standard Goal / Interventions / Aids /
@@ -184,7 +190,9 @@
     pdfService: {
       url:   'https://odc-pdf-service.azurewebsites.net/api/render',
       scope: 'api://c47d2e17-f266-4271-80e6-46170c254ef4/Pdf.Render'
-    }
+    },
+    // v3.4 — RNs team → General channel (messages posted as the signed-in user via Graph ChannelMessage.Send)
+    rnChannel: { teamId: 'd6c52065-6f00-41bc-8bb2-5574c2f630c3', channelId: '19:3Ldx0RxPWSZEn9Z-S5E6yNrDRviVYwTibvA7esVMv0U1@thread.tacv2' }
   };
 </script>
 
@@ -689,6 +697,7 @@ window.ODC_CLOUD = (function() {
         // Re-trigger app startup with cloud data now in place
         if (typeof window.__refreshAppFromCloud === 'function') window.__refreshAppFromCloud();
         if (typeof window.__maybeNotifyReviewsDue === 'function') window.__maybeNotifyReviewsDue();
+        if (window.ODC_TEAMS) setTimeout(function () { ODC_TEAMS.checkNewAgreements(); }, 4000);
       }, 1200);
     } catch (err) {
       console.error('SP connection error:', err);
@@ -1238,7 +1247,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.3</span>
+    <span class="badge">Cloud · v3.4</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1701,6 +1710,7 @@ window.ODC_CLOUD = (function() {
         <div class="no-print" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
           <button type="button" class="btn ghost" id="btnImportOnboarding">⬇ Import from Onboarding form</button>
           <button type="button" class="btn ghost" data-legacy-import>📂 Import last year’s forms (PDF)</button>
+          <button type="button" class="btn" data-rn-handover="new" title="Posts to the RNs channel in Teams that this assessment is complete and the Care Plan can be started">📣 Hand over to RN (assessment complete)</button>
         </div>
       </div>
       <div class="step-meta"><span class="big">01</span>Step One</div>
@@ -1743,7 +1753,10 @@ window.ODC_CLOUD = (function() {
       <div>
         <h1>Annual <em>Assessment</em> & Planning.</h1>
         <p>For clients <strong>after 12 months</strong> of service who are <strong>low level / non-complex</strong>. This single bundled document replaces the full re-assessment. FRAT and Comprehensive Health/Medical Ax are done <em>separately</em> if missing from the file — toggle them on under <em>Adjuncts</em>.</p>
-        <button type="button" class="btn ghost no-print" data-legacy-import style="margin-top:10px">📂 Import last year’s forms (PDF)</button>
+        <div class="no-print" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
+          <button type="button" class="btn ghost" data-legacy-import>📂 Import last year’s forms (PDF)</button>
+          <button type="button" class="btn" data-rn-handover="annual" title="Posts to the RNs channel in Teams that this assessment is complete and the Care Plan can be started">📣 Hand over to RN (assessment complete)</button>
+        </div>
       </div>
       <div class="step-meta"><span class="big">01</span>Annual</div>
     </div>
@@ -1818,7 +1831,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.3"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.4"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -4301,6 +4314,7 @@ function renderCarePlan() {
   bindFields(root);
   applyState(root);
   try { if (window.ODC_RULES) ODC_RULES.applyBanners(); } catch (e) {}
+  try { if (typeof window.__odcAutoAi === 'function') setTimeout(window.__odcAutoAi, 300); } catch (e) {}
   // "No change this year" — stamps a dated review line into the domain's Review field
   root.querySelectorAll('[data-nochange]').forEach(b => b.addEventListener('click', e => {
     const id = e.target.dataset.nochange;
@@ -6602,6 +6616,18 @@ function macApplyDraftTags() {
   }
   const btnAi = document.getElementById('btnAiDraft');
   if (btnAi) btnAi.addEventListener('click', function () { if (!document.querySelector('#careplanContent .cp-domain')) goTo('careplan'); runAi(null); });
+  // v3.4 — the free-text draft runs by itself the first time the Care Plan is opened for a client (silent)
+  window.__odcAutoAi = async function () {
+    const D = state.data; if (!D || D.__ai_auto_tried || D.__ai_draft_at || D.__cp_status === 'approved') return;
+    if (!D.__cp_levels || !Object.keys(D.__cp_levels).length) return;
+    if (!(window.ODC_CLOUD && ODC_CLOUD.getUser && ODC_CLOUD.getUser())) return;
+    D.__ai_auto_tried = Date.now();
+    const b = document.getElementById('btnAiDraft'); const label = b ? b.textContent : '';
+    if (b) { b.disabled = true; b.textContent = '🤖 Drafting free text with AI…'; }
+    try { const r = await ODC_AI.draft(); if (r.written && r.written.length) { renderCarePlan(); autoSave(); } }
+    catch (e) { console.warn('auto AI draft skipped:', e.message); delete D.__ai_auto_tried; }
+    finally { if (b) { b.disabled = false; b.textContent = label; } }
+  };
 
   btnImport.addEventListener('click', openModal);
   btnDraft.addEventListener('click', runDraft);
@@ -7005,7 +7031,8 @@ window.ODC_RULES = (function () {
 
       // Triggered
       if (reasons.length) flag(d, 'level', 'Level: ' + lv + ' — ' + reasons.join('; '));
-      if (B.any && !budget.length) flag(d, 'noservice', 'Need identified but no funded service in the current budget — ' + EDGE.noService.join(' '));
+      const SERVICE_DOMS = { nutrition: 1, hygiene: 1, mobility: 1, continence: 1, skin: 1, home: 1, social: 1, diabetes: 1 };
+      if (B.any && !budget.length && SERVICE_DOMS[d]) flag(d, 'noservice', 'Need identified but no funded service in the current budget — ' + EDGE.noService.join(' '));
       if (manual) {
         flag(d, 'manual', 'Manual domain — goal drafted; the RN writes the interventions and aids for this client (case-specific).');
         const wm = (W[d] || {})[lv];
@@ -7264,9 +7291,11 @@ window.ODC_APPROVAL = (function () {
     } catch (e) {}
     autoSave();
     renderCarePlan();
-    // Teams card (best effort)
+    // Teams — RNs channel (falls back to the webhook card)
     try {
-      const hook = ((window.ODC_CLOUD_CONFIG || {}).teamsWebhookUrl || '').trim();
+      const nx = (function () { const t = new Date(now); t.setMonth(t.getMonth() + 12); return dmy(t.getTime()); })();
+      if (window.ODC_TEAMS) ODC_TEAMS.approved(d, ver, nx).catch(function (e) { console.warn('approved notice failed', e); });
+      const hook = window.ODC_TEAMS ? '' : ((window.ODC_CLOUD_CONFIG || {}).teamsWebhookUrl || '').trim();
       if (hook) fetch(hook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'message', attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive', content: { '$schema': 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.4', body: [{ type: 'TextBlock', size: 'Large', weight: 'Bolder', text: '✅ Care Plan approved — ' + (d.p_name || d.p_preferred || 'client') }, { type: 'TextBlock', wrap: true, text: 'Version ' + ver + ' approved by **' + d.__cp_approved_by + '** on ' + dmy(now) + '. Next full review by ' + (function () { const t = new Date(now); t.setMonth(t.getMonth() + 12); return dmy(t.getTime()); })() + '.' }] } }] }) }).catch(function () {});
     } catch (e) {}
     // PDF filing
@@ -7454,6 +7483,131 @@ window.ODC_AI = (function () {
 
   return { draft: draft, learn: learn, apply: apply, buildRequest: buildRequest, scrubber: scrubber };
 })();
+
+
+
+/* ---------- v3.4: Teams messages to the RNs channel (ODC_TEAMS) ----------
+   Posts as the signed-in user with Graph (ChannelMessage.Send, admin-consented
+   9 Nov 2026) to the RNs team → General channel. Three messages, each once per
+   client / event (English):
+     1. New client — Service Agreement signed  (checked at login from the
+        agreement records; marker file careplan-rn-notified.json on the site)
+     2. Assessment complete — ready for Care Plan  (coordinator presses
+        "📣 Hand over to RN" on the Initial / Annual Assessment)
+     3. Care Plan approved vN  (from ODC_APPROVAL.approve)
+   Falls back to the Teams webhook (teamsWebhookUrl) if the channel post fails. */
+window.ODC_TEAMS = (function () {
+  const MARKER = '/drive/root:/careplan-rn-notified.json';
+  const APP_URL = 'https://onedream-hy.github.io/careplan/';
+  function cfg() { return (window.ODC_CLOUD_CONFIG || {}).rnChannel || {}; }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function dmy(ms) { const t = new Date(ms || Date.now()); return ('0' + t.getDate()).slice(-2) + '/' + ('0' + (t.getMonth() + 1)).slice(-2) + '/' + t.getFullYear(); }
+  function user() { return (window.ODC_CLOUD && ODC_CLOUD.getUser && ODC_CLOUD.getUser()) || {}; }
+  function who() { const u = user(); return u.name || u.email || 'ODC staff'; }
+
+  async function post(subject, html) {
+    const c = cfg();
+    if (!c.teamId || !c.channelId) throw new Error('RN channel not configured');
+    const token = await ODC_CLOUD.getTokenFor(['https://graph.microsoft.com/ChannelMessage.Send']);
+    const r = await fetch('https://graph.microsoft.com/v1.0/teams/' + c.teamId + '/channels/' + encodeURIComponent(c.channelId) + '/messages', {
+      method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ subject: subject, importance: 'normal', body: { contentType: 'html', content: html } })
+    });
+    if (!r.ok) { let m = 'Teams post failed ' + r.status; try { const j = await r.json(); if (j.error) m += ' — ' + j.error.message; } catch (e) {} throw new Error(m); }
+    return r.json();
+  }
+  async function webhook(title, text) {
+    const hook = ((window.ODC_CLOUD_CONFIG || {}).teamsWebhookUrl || '').trim(); if (!hook) return;
+    await fetch(hook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'message', attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive', content: { '$schema': 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.4', body: [{ type: 'TextBlock', size: 'Large', weight: 'Bolder', text: title }, { type: 'TextBlock', wrap: true, text: text }] } }] }) });
+  }
+  async function send(subject, html, plain) {
+    try { await post(subject, html); return 'channel'; }
+    catch (e) { console.warn('RN channel post failed, trying webhook:', e.message); try { await webhook(subject, plain || html.replace(/<[^>]+>/g, '')); return 'webhook'; } catch (e2) { throw e; } }
+  }
+  const link = '<a href="' + APP_URL + '">Open the CarePlan app</a>';
+
+  /* ---- 2. Hand over to RN ---- */
+  function axSummary(D) {
+    const tools = Object.keys((state && state.selectedTools) || {}).filter(function (k) { return state.selectedTools[k]; }).map(function (k) { return (typeof DOCS !== 'undefined' && DOCS[k] && DOCS[k].title) || k; });
+    const bits = [];
+    bits.push('Additional assessments: ' + (tools.length ? tools.join(', ') : 'none ticked'));
+    bits.push('Package budget: ' + (D.__budget_last ? 'imported' + (D.__budget_last_at ? ' ' + dmy(D.__budget_last_at) : '') : 'not imported'));
+    bits.push('MAC Support Plan: ' + (D.__mac ? 'imported' + (D.__mac.generatedOn ? ' (' + D.__mac.generatedOn + ')' : '') : 'not imported'));
+    if (D.__legacy && D.__legacy.files && D.__legacy.files.length) bits.push('Last year\'s forms imported: ' + D.__legacy.files.length);
+    return bits;
+  }
+  async function handover(mode) {
+    const D = state.data; if (!D) throw new Error('Open a client first');
+    const name = D.p_name || D.p_preferred || 'client';
+    const kind = mode === 'annual' ? 'Annual Assessment' : 'Initial Assessment';
+    const bits = axSummary(D);
+    const html = '<p>📝 <b>' + kind + ' complete — ready for Care Plan</b></p><p><b>' + esc(name) + '</b>' + (D.p_mac_id ? ' · MAC ID ' + esc(D.p_mac_id) : '') + '<br/>Completed by ' + esc(who()) + ' on ' + dmy() + '</p><ul>' + bits.map(function (b) { return '<li>' + esc(b) + '</li>'; }).join('') + '</ul><p>The Care Plan draft is generated automatically when an RN opens the client\'s Care Plan — review, accept or edit each DRAFT line, sign and Approve.</p><p>' + link + '</p>';
+    const via = await send(kind + ' complete — ' + name, html, kind + ' complete — ' + name + '. ' + bits.join('; ') + '. Completed by ' + who() + '.');
+    D.__rn_handover = { at: Date.now(), by: who(), mode: mode, via: via };
+    autoSave();
+    return via;
+  }
+
+  /* ---- 3. Approved ---- */
+  async function approved(D, ver, nextReview) {
+    const name = D.p_name || D.p_preferred || 'client';
+    const html = '<p>✅ <b>Care Plan approved — ' + esc(name) + '</b></p><p>Version ' + ver + ' approved by <b>' + esc(D.__cp_approved_by || who()) + '</b> on ' + dmy(D.__cp_approved_at) + '.<br/>Next full review by <b>' + esc(nextReview) + '</b> (earlier on hospital admission / discharge, new budget, new MAC Support Plan, change of carer or living arrangement, or client / family request).</p><p>The signed PDF is filed in the client\'s folder. ' + link + '</p>';
+    return send('Care Plan approved — ' + name + ' v' + ver, html);
+  }
+
+  /* ---- 1. New signed agreements (login check, one device wins via the marker file) ---- */
+  async function checkNewAgreements() {
+    try {
+      if (!window.ODC_AGREEMENT || !window.ODC_CLOUD || !ODC_CLOUD.graph || !ODC_CLOUD.siteId || !cfg().teamId) return;
+      const since = Date.now() - 45 * 24 * 3600 * 1000;
+      const files = (await ODC_AGREEMENT.list()).filter(function (f) { return new Date(f.modified || 0).getTime() >= since; }).slice(0, 25);
+      if (!files.length) return;
+      let marker = { agreements: {} };
+      try { const m = await ODC_CLOUD.graph('/sites/' + ODC_CLOUD.siteId + MARKER + ':/content'); if (m && m.agreements) marker = m; } catch (e) {}
+      const todo = files.filter(function (f) { const k = marker.agreements[f.name]; return !k || (k.modified && k.modified !== f.modified && !k.signed); });
+      if (!todo.length) return;
+      let changed = false;
+      for (const f of todo.slice(0, 8)) {
+        let info = null;
+        try { const rr = await ODC_AGREEMENT.read({ id: f.id }); info = ODC_AGREEMENT.extract(rr.record, rr.meta); } catch (e) { continue; }
+        marker.agreements[f.name] = { modified: f.modified, signed: !!info.signed, at: new Date().toISOString() }; changed = true;
+        if (!info.signed) continue;
+        const p = info.participant || {}; const a = info.agreement || {};
+        const name = p.name || f.client;
+        const html = '<p>🆕 <b>New client — Service Agreement signed</b></p><p><b>' + esc(name) + '</b>' + (a.variant || a.version ? ' · ' + esc([a.variant, a.version].filter(Boolean).join(' ')) : '') + (a.startDate ? '<br/>Service start: ' + esc(String(a.startDate).slice(0, 10)) : '') + (p.suburb ? '<br/>Suburb: ' + esc(p.suburb) : '') + '<br/>Agreement saved ' + (info.savedAt ? esc(String(info.savedAt).slice(0, 10)) : '') + (info.savedBy ? ' by ' + esc(String(info.savedBy).split('@')[0]) : '') + '</p><p>Initial Assessment and Care Plan to be started. In the CarePlan app use <b>Clients → Service Agreements</b> to open the client with the agreement details pre-filled.</p><p>' + link + '</p>';
+        try { await send('New client — ' + name, html); marker.agreements[f.name].notified = new Date().toISOString(); } catch (e) { console.warn('new-client notice failed', e); }
+      }
+      if (changed) await ODC_CLOUD.graph('/sites/' + ODC_CLOUD.siteId + MARKER + ':/content', { method: 'PUT', body: marker });
+    } catch (e) { console.warn('checkNewAgreements skipped:', e); }
+  }
+
+  /* ---- Hand-over buttons on the Initial / Annual Assessment pages ---- */
+  function initButtons() {
+    document.querySelectorAll('[data-rn-handover]').forEach(function (b) {
+      if (b.__bound) return; b.__bound = true;
+      const mode = b.dataset.rnHandover;
+      const refresh = function () { const h = state.data && state.data.__rn_handover; b.textContent = h ? '📣 Handed over to RN ' + dmy(h.at) + ' (' + (h.by || '').split('@')[0] + ') — send again' : '📣 Hand over to RN (assessment complete)'; };
+      b.addEventListener('click', async function () {
+        if (!state.data || !(state.data.p_name || state.data.p_preferred)) { alert('Enter the participant\'s name first.'); return; }
+        if (!confirm('Post to the RNs channel in Teams that the ' + (mode === 'annual' ? 'Annual' : 'Initial') + ' Assessment for ' + (state.data.p_name || state.data.p_preferred) + ' is complete and the Care Plan can be started?')) return;
+        b.disabled = true; const t = b.textContent; b.textContent = 'Sending…';
+        try { const via = await handover(mode); alert('Posted to the RNs channel' + (via === 'webhook' ? ' (via webhook)' : '') + '.'); }
+        catch (e) { alert('Could not post to Teams: ' + (e.message || e)); }
+        finally { b.disabled = false; refresh(); }
+      });
+      refresh();
+      b.__refresh = refresh;
+    });
+    // refresh the label whenever a step is shown (client may have changed)
+    if (typeof window.goTo === 'function' && !window.goTo.__teamsWrapped) {
+      const og = window.goTo;
+      window.goTo = function () { const r = og.apply(this, arguments); try { document.querySelectorAll('[data-rn-handover]').forEach(function (b) { if (b.__refresh) b.__refresh(); }); } catch (e) {} return r; };
+      window.goTo.__teamsWrapped = true;
+    }
+  }
+  return { post: post, send: send, handover: handover, approved: approved, checkNewAgreements: checkNewAgreements, initButtons: initButtons };
+})();
+try { ODC_TEAMS.initButtons(); } catch (e) {}
 
 
 /* ---------- v3.0: Import last year's forms (ODC v0.1 MAY 2024 fillable PDFs) ----------
