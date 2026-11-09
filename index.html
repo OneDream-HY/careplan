@@ -26,7 +26,8 @@
               Providers / Days / Tasks / Review, Risk Alert rows, PEEP and
               Preventative Health as DRAFT (fill-until-edited; banners show
               level, reasons and MANUAL / BUDGET-ONLY / NO-FUNDED-SERVICE flags;
-              new Stoma domain). ODC_APPROVAL: Draft → RN review → Approved —
+              new Stoma domain; Manual domains get the goal only — RN writes
+              interventions / aids case by case, per QA). ODC_APPROVAL: Draft → RN review → Approved —
               Accept per line / per section, Approve needs RN signature and no
               DRAFT left; approval stamps RN name/date, versions and locks the
               plan, logs to Updates, Teams card, opens PDF filing; "Start new
@@ -6851,6 +6852,15 @@ window.ODC_RULES = (function () {
       oral: { goal: ['Blood glucose stays within the GP-set range and complications are prevented.'], iv: ['Encourage diabetic diet; dietitian referral.', 'BGL monitoring [frequency] if prescribed.', 'Foot check at each personal-care visit; podiatry [frequency].', 'Annual eye and kidney checks with GP.', 'Encourage regular physical activity appropriate to [Name]\'s health condition and abilities.', 'Encourage [Name] to attend regular medical reviews and diabetes-related health checks.'], aids: ['BGL meter; diabetic footwear'] },
       insulin: { goal: ['Insulin is administered safely and hypo / hyperglycaemia is recognised and managed.'], iv: ['RN / trained worker administers insulin as per order and records the reading on the BGL chart.', 'Monitor for signs and symptoms of hypoglycaemia or hyperglycaemia and report concerns as required.', 'Monitor foot condition and report to the clinical team and GP any abnormal signs.', 'Encourage adherence to a balanced diet and adequate hydration to support diabetes management.', 'Encourage regular physical activity appropriate to [Name]\'s health condition and abilities.', 'Encourage [Name] to attend regular medical reviews and diabetes-related health checks.', 'Hypo kit in home; workers trained in hypo signs.', 'BGL before each dose; record and report outside range.', 'Diabetes educator review.'], aids: ['Insulin pen; BGL meter; hypo kit; sharps container'] }
     },
+    // Manual domains (Sue, 9 Nov 2026): goals are drafted automatically; interventions and aids are written by the RN case by case
+    enteral: { present: { goal: ['[Name] receives adequate nutrition and hydration via [PEG/NG] safely, without complications, and the feeding site remains healthy.'], iv: [], aids: [] } },
+    catheter: { present: { goal: ['[Catheter type] remains patent and infection-free; [Name] is comfortable and dignity is maintained.'], iv: [], aids: [] } },
+    stoma: { present: { goal: ['The stoma and surrounding skin remain healthy; the appliance is changed as per regime and [Name] feels confident and comfortable managing daily life with the stoma.'], iv: [], aids: [] } },
+    palliative: { present: { goal: ['[Name] is comfortable, symptoms are controlled and care follows [his/her] wishes and Advance Care Directive; family and carers feel supported.'], iv: [], aids: [] } },
+    home: {
+      low: { goal: ['[Name]\'s home is safe for daily activities and falls hazards are reduced.'], iv: [], aids: [] },
+      high: { goal: ['Home modifications are completed and [Name] can move safely through the home.'], iv: [], aids: [] }
+    },
     social: {
       present: { goal: ['[Name] stays connected with community and family and can attend appointments.'], iv: ['Individual social support [frequency]; group activity [day].', 'Accompanied activities / outings [frequency].', 'Transport to medical appointments and shopping [frequency].', 'Encourage phone / video contact with family.', 'Cultural / language-matched worker where possible.'], aids: ['Taxi subsidy; wheelchair-accessible transport'] }
     }
@@ -6924,6 +6934,9 @@ window.ODC_RULES = (function () {
     const a = S(D.ia_mobility_assist) || S(D.mob_assist);
     if (/two/i.test(a)) t = t.replace(/\[1\/2\]|\[2\]/g, '2'); else if (/1 person|one person/i.test(a)) t = t.replace(/\[1\/2\]/g, '1');
     if (S(D.p_language) && !/english/i.test(S(D.p_language))) t = t.replace(/\[language\]/g, '(' + S(D.p_language) + ')');
+    const ct = S(D.cat_type); if (ct) t = t.replace(/\[Catheter type\]/g, ct + ' catheter');
+    const et = S(D.nu_enteral_type); if (et) t = t.replace(/\[PEG\/NG\]/g, et);
+    if (/^f/i.test(S(D.p_gender))) t = t.replace(/\[his\/her\]/g, 'her'); else if (/^m/i.test(S(D.p_gender))) t = t.replace(/\[his\/her\]/g, 'his');
     return t;
   }
   function budgetByDomain(D) {
@@ -6979,6 +6992,7 @@ window.ODC_RULES = (function () {
         if (budget.length) {
           if (!needsFromAx) setDraft(D, draft, K('needs'), EDGE.budgetOnly(D), written);
           flag(d, 'budget', 'Funded service but no need found in the assessment (' + budget.map(function (b) { return b.text; }).join(', ') + ') — RN to confirm; no risk or support level assigned from funding alone.');
+          ['goals', 'intervention', 'aids'].forEach(function (f) { setDraft(D, draft, K(f), '', written); });
           setDraft(D, draft, K('providers'), budget.map(function (b) { return providerFor(b.text) + ' — ' + b.text; }).join('\n'), written);
           setDraft(D, draft, K('days'), budget.map(function (b) { return b.text + ': ' + b.freq; }).join('\n'), written);
           setDraft(D, draft, K('review'), review, written);
@@ -6993,8 +7007,10 @@ window.ODC_RULES = (function () {
       if (reasons.length) flag(d, 'level', 'Level: ' + lv + ' — ' + reasons.join('; '));
       if (B.any && !budget.length) flag(d, 'noservice', 'Need identified but no funded service in the current budget — ' + EDGE.noService.join(' '));
       if (manual) {
-        flag(d, 'manual', 'Manual domain — RN writes the goals, interventions and aids for this level.');
-        ['goals', 'intervention', 'aids'].forEach(function (f) { setDraft(D, draft, K(f), '', written); });
+        flag(d, 'manual', 'Manual domain — goal drafted; the RN writes the interventions and aids for this client (case-specific).');
+        const wm = (W[d] || {})[lv];
+        setDraft(D, draft, K('goals'), wm && wm.goal ? wm.goal.map(function (t) { return fillName(t, D); }).join('\n') : '', written);
+        ['intervention', 'aids'].forEach(function (f) { setDraft(D, draft, K(f), '', written); });
       } else {
         const w = (W[d] || {})[lv];
         if (w) {
