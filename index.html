@@ -18,8 +18,24 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.2 (30 Oct 2026)
+     APP VERSION: v3.3 (9 Nov 2026)
      Version history:
+       v3.3 — Care Plan auto-generation (rules confirmed by QA 9 Nov 2026):
+              ODC_RULES detects each domain's level from the assessments and
+              budget and writes the standard Goal / Interventions / Aids /
+              Providers / Days / Tasks / Review, Risk Alert rows, PEEP and
+              Preventative Health as DRAFT (fill-until-edited; banners show
+              level, reasons and MANUAL / BUDGET-ONLY / NO-FUNDED-SERVICE flags;
+              new Stoma domain). ODC_APPROVAL: Draft → RN review → Approved —
+              Accept per line / per section, Approve needs RN signature and no
+              DRAFT left; approval stamps RN name/date, versions and locks the
+              plan, logs to Updates, Teams card, opens PDF filing; "Start new
+              version" highlights CHANGED fields; review 12 months from
+              approval, due list 2 weeks before. ODC_AI: Azure OpenAI
+              (Australia East, /api/draft) drafts the free-text needs paragraph,
+              one individualised intervention per domain and the preference
+              summary from de-identified notes; approved wording is stored
+              de-identified as examples for later drafts.
        v3.2 — Print picker: each section heading (e.g. "Care Plan") has its own
               tick that selects / clears every form in that section. Budget import: the "Updated dd/mm/yyyy" stamp
               now uses the Date printed on the Package Overview (the day the
@@ -912,6 +928,12 @@ window.ODC_CLOUD = (function() {
   .sig-tools button { background: transparent; border: 1px solid var(--line); color: var(--ink-soft); padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 11.5px; }
   .sig-tools button:hover { border-color: var(--accent); color: var(--accent); }
   .sig-status.signed { color: var(--good); }
+  /* v3.3 approval workflow */
+  #careplanContent.cp-locked textarea, #careplanContent.cp-locked input:not([type=checkbox]), #careplanContent.cp-locked select { background:#f6f6f3 !important; color:#444; pointer-events:none; }
+  #careplanContent.cp-locked input[type=checkbox], #careplanContent.cp-locked .sig-canvas, #careplanContent.cp-locked [data-sigclear], #careplanContent.cp-locked [data-nochange], #careplanContent.cp-locked #btnAddRisk, #careplanContent.cp-locked [data-rmrisk], #careplanContent.cp-locked [data-riskfield] { pointer-events:none; opacity:.6; }
+  #careplanContent.cp-locked #cpStatusBar, #careplanContent.cp-locked #cpStatusBar * { pointer-events:auto; opacity:1; }
+  #careplanContent .cp-changed { box-shadow: inset 3px 0 0 #e0a052 !important; background:#fffaf2; }
+  @media print { .cp-approval-line { font-size:11px; } }
   .sig-print-img { display: none; }
   .sig-print-line { display: none; }
   @media print {
@@ -1215,7 +1237,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.2</span>
+    <span class="badge">Cloud · v3.3</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1748,6 +1770,7 @@ window.ODC_CLOUD = (function() {
           <button type="button" class="btn ghost" id="btnImportMac">📄 Import MAC Support Plan</button>
           <button type="button" class="btn ghost" id="btnImportBudget">🧾 Import package budget (PDF / paste)</button>
           <button type="button" class="btn" id="btnMacDraft">✨ Generate care plan draft</button>
+          <button type="button" class="btn ghost" id="btnAiDraft" title="Azure OpenAI (Australia East) writes the free-text care-needs paragraph, one individualised intervention per domain and the preference summary — as DRAFT for the RN">🤖 AI free-text draft</button>
         </div>
       </div>
       <div class="step-meta"><span class="big" id="cpStepNum">03</span><span id="cpStepLabel">Step Three</span></div>
@@ -1794,7 +1817,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.2"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.3"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -2481,6 +2504,7 @@ function buildAnnualAssessment() {
     </div>
     <div style="margin-top:10px">
       ${ta('p_background','Participant’s general / cultural / religious / life background',{rows:4})}
+      ${ta('cp_snap_preferences','Participant’s choices and preferences — summary',{rows:3})}
     </div>
   </div>
 
@@ -3942,6 +3966,7 @@ function buildCarePlan() {
     diabetes:   ['diabetes'],
     enteral:    [], // handled by special case in shouldShowDomain (PEG-specific check)
     catheter:   ['catheter'],
+    stoma:      ['continence'],
     palliative: ['palliative'],
     home:       [],
     social:     []
@@ -3955,6 +3980,9 @@ function buildCarePlan() {
   // Special case: 'enteral' is gated on the PEG/NG feeding flag specifically, NOT on the
   // Nutrition AX in general — because Nutrition AX is also used for non-PEG cases.
   function shouldShowDomain(id) {
+    if (id === 'stoma') {
+      return !!(D.cont_stoma_which || /stoma/i.test(String(D.cont_complex || '')) || /stoma/i.test(String(D.an_catheter || '')));
+    }
     if (id === 'enteral') {
       // Show only when PEG/NG feeding is indicated (Initial Ax tick) OR enteral fields
       // have been filled in (Nutrition Ax enteral section).
@@ -4121,6 +4149,7 @@ function buildCarePlan() {
     </div>
     <div style="margin-top:10px">
       ${ta('p_background','Participant’s general / cultural / religious / life background',{rows:4})}
+      ${ta('cp_snap_preferences','Participant’s choices and preferences — summary',{rows:3})}
     </div>
   </div>
 
@@ -4230,6 +4259,7 @@ function buildCarePlan() {
     extra: `<div>${ta('cp_enteral_dietitian','Dietitian regime — please attach original report',{rows:1})}</div>`
   }) : ''}
   ${shouldShowDomain('catheter') ? cpDomain('catheter','Catheter Management',{autoNeeds: autoFor.catheter}) : ''}
+  ${shouldShowDomain('stoma') ? cpDomain('stoma','Stoma Management',{autoNeeds: autoFor.stoma}) : ''}
   ${shouldShowDomain('palliative') ? cpDomain('palliative','Palliative Care',{autoNeeds: autoFor.palliative}) : ''}
   ${cpDomain('home','Home Environment Safety',{autoNeeds: autoFor.home})}
   ${cpDomain('social','Social Connection & Transport',{autoNeeds: autoFor.social})}
@@ -4263,10 +4293,13 @@ function buildCarePlan() {
 
 function renderCarePlan() {
   const root = document.getElementById('careplanContent');
-  try { if (state.mode === 'new') prefillInterimFromInitial(); prefillCarePlanFromInitial(); } catch (e) {}
+  const _locked = !!(state.data && state.data.__cp_status === 'approved');
+  try { if (state.mode === 'new') prefillInterimFromInitial(); if (!_locked) prefillCarePlanFromInitial(); } catch (e) {}
+  try { if (window.ODC_RULES && !_locked) ODC_RULES.generate(state.data); } catch (e) { console.warn('rules', e); }
   root.innerHTML = buildCarePlan();
   bindFields(root);
   applyState(root);
+  try { if (window.ODC_RULES) ODC_RULES.applyBanners(); } catch (e) {}
   // "No change this year" — stamps a dated review line into the domain's Review field
   root.querySelectorAll('[data-nochange]').forEach(b => b.addEventListener('click', e => {
     const id = e.target.dataset.nochange;
@@ -4308,6 +4341,7 @@ function renderRiskList() {
     <div class="risk-row" data-riskidx="${i}">
       <div class="risk-head">
         <span class="risk-num">Risk #${i+1}</span>
+        ${r.auto ? '<span class="no-print" style="font-size:10px;font-weight:700;letter-spacing:.04em;color:#6b4e00;background:#fff8e1;border:1px solid #d4a017;border-radius:3px;padding:1px 6px;margin-left:8px">DRAFT — RN to review</span>' : ''}
         <button type="button" class="mini-btn no-print" data-rmrisk="${i}" style="font-size:11px">Remove</button>
       </div>
       <div class="risk-fields">
@@ -4327,12 +4361,16 @@ function renderRiskList() {
       const idx = parseInt(e.target.dataset.riskidx);
       const field = e.target.dataset.riskfield;
       state.data.cp_risks[idx][field] = e.target.value;
+      const row = state.data.cp_risks[idx];
+      if (row.auto && (row.risk !== row.autoRisk || row.action !== row.autoAction)) { delete row.auto; delete row.autoRisk; delete row.autoAction; const tag = e.target.closest('.risk-row').querySelector('.risk-head span[style]'); if (tag) tag.remove(); }
       autoSave();
     });
   });
   root.querySelectorAll('[data-rmrisk]').forEach(b => {
     b.addEventListener('click', e => {
       const idx = parseInt(e.target.dataset.rmrisk);
+      const row = state.data.cp_risks[idx];
+      if (row && row.auto) { state.data.__cp_risk_dismissed = state.data.__cp_risk_dismissed || {}; state.data.__cp_risk_dismissed[row.autoRisk] = 1; }
       state.data.cp_risks.splice(idx, 1);
       renderRiskList();
       autoSave();
@@ -4549,7 +4587,10 @@ window.__maybeNotifyReviewsDue = async function() {
 function computeDueClients(map) {
   const ELEVEN_MONTHS = 11 * 30.44 * 24 * 3600 * 1000;
   const all = Object.values(map || {});
+  const APPROVAL_DUE = (12 * 30.44 - 14) * 24 * 3600 * 1000; // 2 weeks before the 12-month review
   return all.filter(c => {
+    const ap = c.state && c.state.data && c.state.data.__cp_approved_at;
+    if (ap && (Date.now() - ap) >= APPROVAL_DUE && c.state.data.__cp_status === 'approved') return true;
     const started = c.createdAt || c.lastSaved || 0;
     if (!started || (Date.now() - started) < ELEVEN_MONTHS) return false;
     const nm = ((c.state && c.state.data && c.state.data.p_name) || '').trim().toLowerCase();
@@ -4944,8 +4985,11 @@ function prefillCarePlanFromInitial() {
   function setAuto(key, val) {
     if (val && val.indexOf('\n') < 0 && val.indexOf('Notes: ') === 0) val = val.slice(7); // single note line — no label needed
     const cur = D[key] == null ? '' : String(D[key]);
-    const isAuto = !cur.trim() || cur === auto[key];
+    const isAuto = !cur.trim() || cur === auto[key] || (D.__mac_draft && D.__mac_draft[key] === cur);
     if (!isAuto) return;                       // staff wording — leave alone
+    const ai = D.__ai_draft && D.__ai_draft[key];
+    if (ai && cur.indexOf(ai) !== -1 && val && val.indexOf(ai) === -1) { val = val + '\n\n' + ai; if (cur !== val) { D[key] = val; } auto[key] = val; if (D.__mac_draft) D.__mac_draft[key] = val; return; }
+    if (D.__mac_draft && D.__mac_draft[key] === cur && val) delete D.__mac_draft[key]; // assessment text replaces the engine placeholder
     if (!val) { if (cur && cur === auto[key]) { D[key] = ''; delete auto[key]; } return; }
     if (cur !== val) { D[key] = val; }
     auto[key] = val;
@@ -4963,6 +5007,7 @@ function prefillCarePlanFromInitial() {
   setAuto('cp_medication_needs', compose([{l:'Medications', k:['med_meds']}, {l:'Assistance', k:['ia_med_assist','med_assist']}, {l:'Assisted by', k:['med_assist_by']}, {l:'Polypharmacy', k:['ia_polypharmacy','med_polypharmacy']}, {l:'Anticoagulant', k:['ia_anticoagulant','med_anticoag']}, {l:'Allergies', k:['med_allergies_summary','med_allergies']}, {l:'Notes', k:['ia_med_notes','med_notes']}]));
   setAuto('cp_pain_needs', compose([{l:'Pain', k:['ia_pain_yes']}, {l:'Chronic pain', k:['ia_chronicPain']}, {l:'Relief', k:['pain_relief']}, {l:'Strategies', k:['pain_strategies']}, {l:'Treatment', k:['pain_treatment']}, {l:'Notes', k:['ia_pain_notes']}]));
   setAuto('cp_diabetes_needs', compose([{l:'Diabetes', k:['ia_diabetes']}, {l:'Insulin', k:['ia_insulin']}, {l:'Diabetic plan', k:['med_diabetic_plan']}, {l:'Notes', k:['ia_diabetes_notes']}]));
+  setAuto('cp_stoma_needs', compose([{l:'Stoma', k:['cont_stoma_which']}, {l:'Support', k:['cont_support']}, {l:'Notes', k:['ia_continence_notes']}]));
   setAuto('cp_catheter_needs', compose([{l:'Catheter / stoma', k:['ia_catheter']}, {l:'Support', k:['cont_support']}, {l:'Notes', k:['ia_continence_notes']}]));
   setAuto('cp_enteral_needs', compose([{l:'PEG / NG feeding', k:['ia_pegFeeding']}, {l:'Type', k:['nu_enteral_type']}, {l:'Mode', k:['nu_enteral_mode']}, {l:'Formula', k:['nu_enteral_name']}]));
   setAuto('cp_palliative_needs', compose([{l:'Palliative', k:['ia_palliative']}, {l:'Terminal illness', k:['med_terminal']}, {l:'ACD', k:['acd_have']}, {l:'ACD notes', k:['acd_notes']}]));
@@ -4987,6 +5032,7 @@ function autoBuildInterim(changedKey) {
     try { prefillInterimFromInitial(); } catch (e) {}
   }
   try { prefillCarePlanFromInitial(); cpAutoRefreshFields(); } catch (e) {}
+  try { if (window.ODC_RULES && typeof cpRulesRun === 'function' && !(state.data && state.data.__cp_status === 'approved')) { cpRulesRun(); if (document.querySelector('#careplanContent .cp-domain')) { ODC_RULES.applyBanners(); renderRiskList(); if (window.ODC_APPROVAL) ODC_APPROVAL.decorate(); else if (typeof macApplyDraftTags === 'function') macApplyDraftTags(); } } } catch (e) {}
 }
 
 function renderInterimForPrint() {
@@ -6369,6 +6415,7 @@ function macGenerateDraft(D, opts) {
       const text = lines.join('\n');
       const cur = D[key] ? String(D[key]).trim() : '';
       if (!cur || (opts.force && draft[key] === D[key])) { D[key] = text; draft[key] = text; written.push(key); }
+      else if (draft[key] === D[key] && cur.indexOf(text) === -1) { D[key] = cur + '\n' + text; draft[key] = D[key]; written.push(key); } // engine text — add the MAC lines beneath it
     });
   });
   D.__mac_draft_at = Date.now();
@@ -6535,8 +6582,25 @@ function macApplyDraftTags() {
     renderCarePlan();
     autoSave();
     const n = written.length;
-    alert(n ? 'Care plan draft generated — ' + n + ' field(s) filled across the domains and tagged DRAFT.\n\nAn RN must review each tagged field, edit as needed and sign the Care Plan.' : 'Nothing new to add — every domain field that could be drafted already has text. Clear a field and generate again to re-draft it.');
+    runAi(n);
   }
+  async function runAi(macCount) {
+    const b = document.getElementById('btnAiDraft');
+    const label = b ? b.textContent : '';
+    if (b) { b.disabled = true; b.textContent = '🤖 Drafting with AI… (10–30 s)'; }
+    try {
+      const r = await ODC_AI.draft();
+      renderCarePlan(); autoSave();
+      const msg = (macCount != null ? 'Care plan draft generated — ' + macCount + ' field(s) from the Support Plan / budget.\n' : '') +
+        (r.error ? 'AI free-text: ' + r.error : 'AI free-text: ' + r.written.length + ' field(s) drafted.') +
+        '\n\nEvery drafted line is tagged DRAFT — the RN accepts or edits each one before approving.';
+      alert(msg);
+    } catch (e) {
+      alert((macCount != null ? 'Care plan draft generated (' + macCount + ' field(s)).\n' : '') + 'AI free-text draft failed: ' + (e.message || e));
+    } finally { if (b) { b.disabled = false; b.textContent = label; } }
+  }
+  const btnAi = document.getElementById('btnAiDraft');
+  if (btnAi) btnAi.addEventListener('click', function () { if (!document.querySelector('#careplanContent .cp-domain')) goTo('careplan'); runAi(null); });
 
   btnImport.addEventListener('click', openModal);
   btnDraft.addEventListener('click', runDraft);
@@ -6544,9 +6608,835 @@ function macApplyDraftTags() {
   // DRAFT tags whenever the Care Plan is (re)rendered
   const _origRender = window.renderCarePlan;
   if (typeof _origRender === 'function' && !_origRender.__macWrapped) {
-    window.renderCarePlan = function () { const r = _origRender.apply(this, arguments); try { macApplyDraftTags(); } catch (e) { console.warn(e); } return r; };
+    window.renderCarePlan = function () { const r = _origRender.apply(this, arguments); try { if (window.ODC_APPROVAL) ODC_APPROVAL.decorate(); else macApplyDraftTags(); } catch (e) { console.warn(e); } return r; };
     window.renderCarePlan.__macWrapped = true;
   }
+})();
+
+
+
+/* ---------- v3.3: Care Plan rule engine (ODC_RULES) ----------
+   Rules and standard wording confirmed by QA (Sue) 9 Nov 2026 and Hayley
+   (review period, approval). For every Care Plan domain the engine:
+     1. detects the level from the assessments (Initial/Annual Ax, FRAT,
+        Waterlow, MST, Pain, Continence, Meds …) and the package budget;
+     2. writes the standard Goal / Interventions / Aids / Providers / Days /
+        Review text for that level — DRAFT, fill-until-edited (same
+        __mac_draft map and "DRAFT — RN to review" tag as the MAC draft);
+     3. adds Risk Alert rows, PEEP and Preventative Health suggestions;
+     4. raises flags (D.__cp_flags) for the edge cases the RN must decide:
+        budget-only domain, need without a funded service, conflicting
+        sources, "Manual" domains (RN writes the plan content).
+   Everything regenerates on each Care Plan render while the field still
+   holds the engine's own text; staff wording is never overwritten. */
+window.ODC_RULES = (function () {
+  const REVIEW_MONTHS = 12;
+  const MANUAL = { enteral: 1, palliative: 1, catheter: 1, stoma: 1, home: 1 }; // RN writes content; needs still auto
+  const LABELS = { nutrition: 'Nutrition (Meals & Drink)', hygiene: 'Personal Hygiene', mobility: 'Mobility / Transferring', continence: 'Toileting / Continence', behaviour: 'Behaviour / Mental Health', cognition: 'Cognition', communication: 'Communication & Sensory', skin: 'Skin Integrity', medication: 'Medication Management', pain: 'Pain Management', diabetes: 'Diabetic Management', enteral: 'Enteral Feeding', catheter: 'Catheter Management', stoma: 'Stoma Management', palliative: 'Palliative Care', home: 'Home Environment Safety', social: 'Social Connection & Transport' };
+
+  /* ---- helpers ---- */
+  function S(v) { if (v == null || v === false) return ''; if (v === true) return 'Yes'; return Array.isArray(v) ? v.join(', ') : String(v).trim(); }
+  function yes(v) { return v === true || /^yes/i.test(S(v)); }
+  function num(v) { const n = parseFloat(String(v == null ? '' : v).replace(/[^\d.\-]/g, '')); return isNaN(n) ? null : n; }
+  function has(v, re) { return re.test(S(v)); }
+  function name(D) { const n = S(D.p_preferred) || S(D.p_name); return n || 'the client'; }
+  function age(D) { const m = S(D.p_dob).match(/^(\d{4})-(\d{2})-(\d{2})/); if (!m) return null; const t = new Date(); let a = t.getFullYear() - +m[1]; if (t.getMonth() + 1 < +m[2] || (t.getMonth() + 1 === +m[2] && t.getDate() < +m[3])) a--; return a; }
+  function dmy(d) { return ('0' + d.getDate()).slice(-2) + '/' + ('0' + (d.getMonth() + 1)).slice(-2) + '/' + d.getFullYear(); }
+  function addMonths(ms, n) { const d = new Date(ms); d.setMonth(d.getMonth() + n); return d; }
+
+  /* ---- 1. Level detection (Section 1 of the confirmed rules) ---- */
+  const DETECT = {
+    nutrition: function (D, r) {
+      const mst = num(D.mna_score);
+      const bmi = num(D.ia_bmi);
+      const aspiration = yes(D.ia_swallowing) || yes(D.ch_swallow) || (S(D.nu_diet) && !/normal/i.test(S(D.nu_diet))) || (S(D.nu_fluid) && !/^thin/i.test(S(D.nu_fluid))) || yes(D.ch_texture);
+      const loss = yes(D.ia_weightLoss) || /^yes/i.test(S(D.nu_weight_change));
+      if (mst != null && mst <= 7) r.push('MST ' + mst + ' — malnourished');
+      else if (mst != null && mst <= 11) r.push('MST ' + mst + ' — at risk');
+      if (bmi != null && bmi < 18.5) r.push('BMI ' + bmi + ' (<18.5)');
+      if (loss) r.push('recent weight loss' + (mst == null ? ' — MST required' : ''));
+      if (aspiration) r.push('aspiration / choking risk (texture-modified diet or thickened fluids)');
+      if (yes(D.ia_appetiteIssue) || /^no/i.test(S(D.nu_adequate))) r.push('poor appetite / inadequate intake');
+      if ((mst != null && mst <= 7) || aspiration) return 'high';
+      if (r.length) return 'risk';
+      return '';
+    },
+    hygiene: function (D, r) {
+      const lv = S(D.hyg_personal) || S(D.ia_personalCare);
+      if (/full/i.test(lv)) { r.push('personal care: full assistance'); return 'full'; }
+      if (/some assist/i.test(lv) || yes(D.ia_hygieneAssist)) { r.push('personal care: assistance'); return 'assist'; }
+      if (/supervision/i.test(lv)) { r.push('personal care: supervision'); return 'supervision'; }
+      if (/supervision|assist/i.test(S(D.hyg_oral_level))) { r.push('oral care: ' + S(D.hyg_oral_level)); return 'supervision'; }
+      return '';
+    },
+    mobility: function (D, r) {
+      const frat = S(D.frat_risk), total = S(D.frat_total);
+      const assist = S(D.ia_mobility_assist) || S(D.mob_assist);
+      const falls = yes(D.ia_falls) || yes(D.mob_falls12m) || yes(D.mob_falls_history) || (S(D.frat_falls_hx) && !/^0/.test(S(D.frat_falls_hx)));
+      const aid = yes(D.ia_mobilityAid) || /^no/i.test(S(D.ch_walk_unaided)) || (S(D.mob_aids) && !/^none$/i.test(S(D.mob_aids)));
+      if (frat) r.push('FRAT ' + (total ? total + ' ' : '') + frat.toLowerCase() + ' risk');
+      if (falls) r.push('fall(s) in the last 12 months');
+      if (aid) r.push('uses a mobility aid');
+      if (/two|wheelchair|bed/i.test(assist)) r.push('mobilising: ' + assist);
+      if (/high/i.test(frat) || /two|wheelchair|bed/i.test(assist)) return 'high';
+      if (/moderate/i.test(frat) || falls || /1 person|one person/i.test(assist)) return 'moderate';
+      if (/low/i.test(frat) || aid || yes(D.ia_balanceIssue)) return 'low';
+      return '';
+    },
+    continence: function (D, r) {
+      const bl = /incontinent/i.test(S(D.ia_bladder)), bw = /incontinent/i.test(S(D.ia_bowel));
+      const any = bl || bw || yes(D.ia_incontinent) || S(D.cont_type) || num(D.cont_inc_day) > 0 || S(D.cont_aid_used);
+      if (!any) return '';
+      if (bl && bw) r.push('double incontinence'); else if (bl || bw || S(D.cont_type)) r.push('single incontinence' + (S(D.cont_type) ? ' — ' + S(D.cont_type) : ''));
+      if (num(D.cont_inc_day) != null) r.push(num(D.cont_inc_day) + ' episode(s)/day');
+      if (S(D.cont_consumer_level)) r.push('toileting: ' + S(D.cont_consumer_level));
+      if ((bl && bw) || /full/i.test(S(D.cont_consumer_level)) || num(D.cont_inc_day) >= 3) return 'regular';
+      return 'occasional';
+    },
+    behaviour: function (D, r) {
+      const dx = yes(D.mh_diagnosed) || yes(D.ia_behaviour) || yes(D.mh_bsp) || S(D.beh_risks) || S(D.beh_strategies);
+      const sym = S(D.mh_shows) || yes(D.ia_psychotropic) || yes(D.beh_psychotropic);
+      if (yes(D.mh_diagnosed)) r.push('mental-health diagnosis: ' + (S(D.mh_diagnosed_detail) || 'listed'));
+      if (yes(D.mh_bsp) || S(D.beh_strategies)) r.push('behaviour support plan / strategies in place');
+      if (S(D.mh_shows)) r.push('symptoms: ' + S(D.mh_shows));
+      if (dx) return 'active';
+      if (sym) return 'monitor';
+      return '';
+    },
+    cognition: function (D, r) {
+      const dem = yes(D.ia_dementia) || /diagnosed dementia/i.test(S(D.cog_status)) || yes(D.cog_diagnosed);
+      const imp = yes(D.ia_cognitiveImpair) || /reported cognitive/i.test(S(D.cog_status)) || yes(D.ch_memory) || /^no/i.test(S(D.ch_orient)) || yes(D.ch_cog);
+      const rudas = S(D.cog_rudas) || (/RUDAS/i.test(S(D.cog_status)) ? 'RUDAS done' : '');
+      if (dem) r.push('dementia / MCI diagnosis' + (S(D.cog_diagnosed_detail) ? ' — ' + S(D.cog_diagnosed_detail) : ''));
+      if (imp && !dem) r.push('cognitive impairment / memory concern reported');
+      if (rudas) r.push(rudas);
+      if (dem) return 'moderate';
+      if (imp) return 'mild';
+      return '';
+    },
+    communication: function (D, r) {
+      if (yes(D.ia_hearingIssue)) r.push('hearing impairment');
+      if (yes(D.ia_visionIssue) || yes(D.ia_legallyBlind)) r.push('vision impairment');
+      if (yes(D.ia_speechIssue) || /non-verbal/i.test(S(D.comm_speech_verbal))) r.push('speech difficulty / non-verbal');
+      if (yes(D.p_interpreter) || yes(D.ch_interpreter) || yes(D.comm_speech_interp)) r.push('interpreter required' + (S(D.p_language) ? ' (' + S(D.p_language) + ')' : ''));
+      return r.length ? 'present' : '';
+    },
+    skin: function (D, r) {
+      const wl = num(D.wl_score);
+      const wound = yes(D.ia_woundActive) || S(D.wound_location) || S(D.wound_cause);
+      if (wl != null && wl >= 20) r.push('Waterlow ' + wl + ' — very high risk');
+      else if (wl != null && wl >= 15) r.push('Waterlow ' + wl + ' — high risk');
+      else if (wl != null && wl >= 10) r.push('Waterlow ' + wl + ' — at risk');
+      if (wound) r.push('active / chronic wound' + (S(D.wound_location) ? ' — ' + S(D.wound_location) : ''));
+      if (yes(D.ia_pressureInjuryRisk)) r.push('pressure injury risk');
+      if (yes(D.ia_skinTear)) r.push('skin tear');
+      if (yes(D.ia_skinIssue) && !r.length) r.push('skin condition noted');
+      if ((wl != null && wl >= 15) || wound || yes(D.ia_pressureInjuryRisk)) return 'high';
+      if (r.length) return 'risk';
+      return '';
+    },
+    medication: function (D, r) {
+      const poly = yes(D.ia_polypharmacy) || yes(D.med_polypharmacy);
+      const hi = yes(D.ia_anticoagulant) || yes(D.med_anticoag) || yes(D.ia_insulin) || yes(D.med_cytotoxic);
+      const a = S(D.ia_med_assist);
+      if (poly) r.push('polypharmacy (5+ medications)');
+      if (yes(D.ia_anticoagulant) || yes(D.med_anticoag)) r.push('anticoagulant');
+      if (yes(D.ia_insulin)) r.push('insulin');
+      if (yes(D.med_cytotoxic)) r.push('cytotoxic medication');
+      if (a && !/^none/i.test(a)) r.push('requires ' + a.toLowerCase());
+      if (/administration/i.test(a) || hi || /support worker/i.test(S(D.med_assist_by))) return 'assist';
+      if (poly || /prompt|supervision/i.test(a) || yes(D.med_assist) || yes(D.med_concerns)) return 'prompt';
+      return '';
+    },
+    pain: function (D, r) {
+      const avg = S(D.pain_avg), worst = S(D.pain_worst);
+      const any = yes(D.ia_pain) || yes(D.ia_chronicPain) || (avg && !/^no pain/i.test(avg)) || S(D.pain_status);
+      if (!any) return '';
+      if (yes(D.ia_chronicPain)) r.push('chronic pain');
+      if (avg) r.push('pain on average: ' + avg);
+      if (worst) r.push('worst: ' + worst);
+      if (S(D.pain_treatment)) r.push('treatment: ' + S(D.pain_treatment));
+      if (/severe/i.test(avg) || /severe/i.test(worst) || /severe/i.test(S(D.pain_status))) return 'severe';
+      return 'moderate';
+    },
+    diabetes: function (D, r) {
+      const dx = yes(D.ia_diabetes) || S(D.dm_type);
+      if (!dx) return '';
+      r.push('diabetes' + (S(D.dm_type) ? ' — ' + S(D.dm_type) : ''));
+      if (yes(D.ia_insulin) || yes(D.med_diabetic_plan)) { r.push('insulin'); return 'insulin'; }
+      return 'oral';
+    },
+    enteral: function (D, r) { if (yes(D.ia_pegFeeding) || yes(D.nu_enteral) || S(D.nu_enteral_type)) { r.push((S(D.nu_enteral_type) || 'PEG / NG') + ' feeding'); return 'present'; } return ''; },
+    catheter: function (D, r) {
+      const t = S(D.cat_type) || (S(D.cont_complex).match(/catheter|external/i) ? S(D.cont_complex) : '') || (/indwelling|supra|intermittent|external/i.test(S(D.an_catheter)) ? S(D.an_catheter) : '');
+      if (yes(D.ia_catheter) || t) { r.push('catheter' + (t ? ' — ' + t : '')); return 'present'; }
+      return '';
+    },
+    stoma: function (D, r) { const w = S(D.cont_stoma_which); if (w || /stoma/i.test(S(D.cont_complex)) || /stoma/i.test(S(D.an_catheter))) { r.push('stoma' + (w ? ' — ' + w : '')); return 'present'; } return ''; },
+    palliative: function (D, r) { if (yes(D.ia_palliative) || S(D.med_terminal)) { r.push('palliative / end-of-life care' + (S(D.med_terminal) ? ' — ' + S(D.med_terminal) : '')); return 'present'; } return ''; },
+    home: function (D, r) {
+      const haz = yes(D.ia_homeSafety) || yes(D.ia_home_repairs) || (S(D.frat_env) && !/^0/.test(S(D.frat_env)));
+      const high = /high/i.test(S(D.frat_risk)) || (D.__mac && D.__mac.approvals && D.__mac.approvals.hm);
+      if (haz) r.push('home hazard / maintenance need identified');
+      if (/^no/i.test(S(D.ia_stairs))) r.push('cannot manage stairs');
+      if (high) r.push(/high/i.test(S(D.frat_risk)) ? 'FRAT high risk' : 'home modifications approved');
+      if (high && (haz || /^no/i.test(S(D.ia_stairs)))) return 'high';
+      if (haz || /^no/i.test(S(D.ia_stairs)) || /moderate/i.test(S(D.frat_risk))) return 'low';
+      return '';
+    },
+    social: function (D, r) {
+      if (yes(D.ia_socialIsolation)) r.push('socially isolated');
+      if (yes(D.ia_social_geo)) r.push('geographically isolated');
+      if (yes(D.ia_noTransport)) r.push('no transport');
+      if (/monthly|other/i.test(S(D.ia_social_family)) && /monthly|other/i.test(S(D.ia_social_friends))) r.push('limited family / friend contact');
+      return r.length ? 'present' : '';
+    }
+  };
+
+  /* ---- 2. Standard wording (Section 2, Sue's edits included verbatim) ---- */
+  const PRIVACY = 'Respect my privacy by ensuring personal care is undertaken in a private and dignified manner.';
+  const TRIP = 'Ensure walkways, floors, and frequently used areas are free from clutter, loose rugs, and other trip hazards.';
+  const CULT_MEALS = 'Provide culturally appropriate meals, meal preparation, and assistance with meal-related tasks.';
+  const ESCALATE_CONT = 'Escalate concerns such as pain, burning, blood in urine, increased frequency, or sudden deterioration to the Care Partner and/or healthcare professional.';
+  const MH_GOALS = ['To maintain emotional stability and positive emotions.', 'To support [Name]\'s emotional wellbeing, mental health, safety, and quality of life while promoting dignity, independence, and meaningful engagement in daily activities.'];
+  const FALL_GOAL = 'Maintain optimal functional independence and mobility while reducing the likelihood of falls, injuries, hospitalisation, and loss of confidence related to falling.';
+  const PAIN_MON = 'Monitor and document pain levels, including the location, severity, frequency and impact on daily activities, and report to the Care Partner and relevant health professionals.';
+  const W = {
+    nutrition: {
+      risk: { goal: ['[Name] maintains adequate nutrition and hydration and maintains an optimum level of weight.'],
+        iv: ['Monitor food and fluid intake; report reduced intake or weight loss to the RN.', 'Weight chart — weigh and record monthly.', 'Nutritional supplements as prescribed (frequency / amount).', 'Preferred diet identified and provided at meal preparation.', CULT_MEALS, 'Assist with meal preparation [frequency from budget].', 'Encourage 6–8 cups of fluid daily unless restricted.', 'Meal delivery [frequency] as funded.'],
+        aids: ['Meal delivery; kitchen aids; supplements; weight chart'] },
+      high: { goal: ['[Name]\'s weight stabilises and nutritional risk is reduced within 3 months.', 'Maintain safe swallowing and adequate nutrition/hydration while minimising the risk of aspiration, choking, and related complications.'],
+        iv: ['Weigh monthly and record; report loss >2 kg.', 'Dietitian referral / review.', 'High-protein / high-energy supplements as prescribed — frequency, ( ) mls.', CULT_MEALS, 'Speech pathologist referral / review.', 'Texture-modified diet [texture] and [fluid thickness] as per speech pathology.', 'Support worker to prepare and sit with [Name] at meals.', 'Encourage slow eating, small mouthfuls, and supervised intake as required.', 'Monitor for signs of aspiration or choking and report concerns promptly.'],
+        aids: ['Weight chart; supplements; thickener; adapted cutlery / plate'] }
+    },
+    hygiene: {
+      supervision: { goal: ['[Name] completes personal care safely with prompting and remains independent as far as possible.'], iv: ['Prompt and set up for shower / dressing; stand by for safety.', 'Monitor skin during personal care; report changes.', 'Encourage own participation.', 'Ensure oral care is attended.', PRIVACY], aids: ['Shower chair; non-slip mat; hand-held shower'] },
+      assist: { goal: ['[Name] maintains personal hygiene and dignity with assistance [frequency].'], iv: ['Assist with shower, hair, grooming and dressing [days / frequency].', PRIVACY, 'Assist with oral care including denture care.', 'Respect preference for [gender of worker / time of day].', 'Oral care and nail care; podiatry referral if needed.'], aids: ['Shower chair / stool; grab rails; long-handled aids'] },
+      full: { goal: ['[Name] receives full personal care safely, comfortably and with dignity and privacy.'], iv: ['Full assistance with all personal care [frequency]; two workers if required.', 'Assist with oral care including denture care.', 'Skin check at each shower; pressure-area care.', 'Respect preference for [gender of worker / time of day].', 'Continence care integrated with hygiene care.', PRIVACY], aids: ['Commode / shower commode; hoist if required; slide sheet'] }
+    },
+    mobility: {
+      low: { goal: ['[Name] stays mobile and independent and remains free from falls.', FALL_GOAL], iv: ['Encourage regular walking / exercise.', 'Review footwear; keep walkways clear.', 'Reassess FRAT in 12 months or after any fall.', 'Encourage the use of appropriate mobility aids (e.g., walking stick, walker).', 'Check mobility aid condition at each visit; prompt use of the aid for all walking.', 'Encourage slow position changes from lying to sitting and sitting to standing to minimise dizziness and postural hypotension.', 'Review any changes in mobility, balance, medication, or health condition.', TRIP], aids: ['Nil / as recommended by physio'] },
+      moderate: { goal: ['[Name] mobilises safely with [aid] and the risk of falls is reduced.', FALL_GOAL], iv: ['Use [walking aid] at all times; check condition each visit.', 'Encourage wearing non-slip footwear while mobilising.', 'Physiotherapy strength and balance program [frequency].', 'Supervise transfers; encourage slow position changes.', 'Review medications contributing to falls with GP.', 'Reassess FRAT 6-monthly.', TRIP], aids: ['4-wheel walker / stick; night light; non-slip footwear'] },
+      high: { goal: ['[Name] remains free from falls and injury; transfers safely with [1/2] person assist.', 'To minimise the risk of falls and fall-related injuries while maintaining [Name]\'s safety and quality of life.'], iv: ['[1/2]-person assist for all transfers; use [equipment].', 'Encourage wearing non-slip footwear while mobilising.', 'Physiotherapy / OT home-safety review within 4 weeks.', 'Personal alarm worn at all times.', 'Hip protectors / sensor mat if recommended.', 'Report every fall or near-miss to the RN the same day.', 'Reassess FRAT 3-monthly.', TRIP], aids: ['Walker / wheelchair; transfer belt; personal alarm; bed rails / sensor as assessed'] }
+    },
+    continence: {
+      occasional: { goal: ['[Name] manages continence with minimal support and maintains skin integrity.', 'Maintain comfort, dignity, and independence in managing urinary incontinence.', 'Reduce episodes of urinary leakage where possible through appropriate continence management strategies.', 'Remain socially engaged and confident in daily activities despite continence concerns.'], iv: ['Prompt regular toileting; easy access to toilet.', 'Continence aids as required [product].', 'Monitor fluid intake; avoid caffeine late in the day.', ESCALATE_CONT], aids: ['Continence pads; raised toilet seat'] },
+      regular: { goal: ['[Name] is kept clean, dry and comfortable; skin remains intact; dignity is maintained.', 'Remain socially engaged and confident in daily activities despite continence concerns.'], iv: ['Scheduled toileting [times]; change aids [frequency].', 'Support perineal hygiene following episodes of incontinence.', 'Skin care and barrier cream with each change.', 'Continence nurse assessment / CAPS application.', ESCALATE_CONT, 'Monitor and report UTI symptoms.'], aids: ['Pads / pull-ups; commode; urinal; mattress protector'] }
+    },
+    behaviour: {
+      monitor: { goal: ['[Name] reports stable mood and feels supported.'].concat(MH_GOALS), iv: ['Support worker observes mood and engagement; report changes to the RN.', 'Encourage social activity and routine.', 'GP review if low mood persists >2 weeks.', 'Provide emotional support.', 'Apply active listening skills when communicating with [Name].', 'Encourage outdoor activities.', 'Provide assistance with social connection: introduce community / cultural senior activities.'], aids: [] },
+      active: { goal: ['Behaviours of concern are reduced and [Name] and carers remain safe.'].concat(MH_GOALS), iv: ['Follow Behaviour Support Plan [attached].', 'Known triggers: [triggers]; de-escalation: [strategies].', 'Mental-health care plan with GP / referral to [service].', 'Consistent workers and routine.', 'Provide emotional support.', 'Apply active listening skills when communicating with [Name].', 'Encourage outdoor activities.'], aids: [] }
+    },
+    cognition: {
+      mild: { goal: ['[Name] remains safe at home and retains independence with memory supports.'], iv: ['Written reminders, calendar, medication prompts.', 'Consistent routine and workers.', 'RUDAS test if required.', 'Communicate information clearly and allow additional time for [Name] to process and respond.', 'Encourage [Name] to remain engaged in meaningful daily activities that support cognitive functioning and wellbeing.', 'Provide reminders and prompts as required to assist with appointments, routines and daily tasks.', 'Support [Name] with organising complex tasks while encouraging independence wherever possible.', 'Monitor for any changes in memory, cognition, decision-making ability or daily functioning and report concerns to the Care Partner and clinical team.', 'GP / memory clinic review.'], aids: ['Whiteboard; automatic pill dispenser; calendar clock'] },
+      moderate: { goal: ['[Name] is safe, oriented to carers and routine, and family / carer is supported.'], iv: ['Dementia-specific support [service].', 'Communicate information clearly and allow additional time for [Name] to process and respond.', 'Encourage [Name] to remain engaged in meaningful daily activities that support cognitive functioning and wellbeing.', 'Door sensors / stove isolation / GPS tracker as assessed.', 'Assistance with medications and meals.', 'Carer support / respite [frequency].', 'Advance care planning discussion.'], aids: ['Sensor alarm; stove timer; GPS pendant'] }
+    },
+    communication: {
+      present: { goal: ['[Name] can communicate needs and participate in care decisions.'], iv: ['Hearing aids checked and worn; batteries supplied.', 'Glasses worn; adequate lighting; large print.', 'Interpreter [language] booked for assessments and reviews.', 'Speak clearly, face [Name], allow time; use a communication board if non-verbal.', 'Communicate with [Name] in a clear, respectful, and person-centred manner.', 'Audiology / optometry review annually.'], aids: ['Hearing aids; glasses; magnifier; communication board'] }
+    },
+    skin: {
+      risk: { goal: ['[Name]\'s skin remains intact.', 'Maintain skin integrity and prevent skin breakdown through regular monitoring and good personal hygiene.'], iv: ['Skin check at each personal-care visit; report redness / breaks.', 'Moisturise daily; encourage fluids and protein.', 'Reposition / encourage movement 2-hourly if sitting for long periods.'], aids: ['Moisturiser; pressure-relieving cushion'] },
+      high: { goal: ['Pressure injury is prevented; existing wound [location] heals within [weeks].', 'Maintain skin integrity and prevent skin breakdown through regular monitoring, good personal hygiene and appropriate continence management.'], iv: ['Pressure-relieving mattress and cushion.', 'Reposition 2-hourly; heel off-loading.', 'Wound care per RN Wound Treatment Record [frequency].', 'Dietitian review for wound healing / nutritional supplement.', 'Weekly RN skin / wound review.'], aids: ['Alternating air mattress; heel protectors; pressure-relieving cushion; dressings as prescribed'] }
+    },
+    medication: {
+      prompt: { goal: ['[Name] takes medications as prescribed.', 'Maintain safe medication administration through minimal family support and supervision.', 'Ensure safe administration, minimise errors, and maintain independent medication administration.'], iv: ['Support worker prompts from Webster pack at [times]; records on sheet.', 'Report missed doses or side-effects to the RN.', 'Annual Home Medicines Review with pharmacist.', 'Support [Name] to maintain independence with medication administration where able.', 'Ensure medications are organised in a dosette box or Webster pack.', 'Provide supervision and prompts as needed to promote safe and correct medication administration.', 'Encourage [Name] to take medications as prescribed and report to the GP any missed doses or concerns.', 'Ensure medications are stored safely and accessed according to prescribed instructions.', 'Advise ongoing GP review of medications and health condition.'], aids: ['Webster pack; dosette; alarm'] },
+      assist: { goal: ['Medications are administered safely and accurately with no missed doses.', 'Ensure medications are administered safely, accurately, and in accordance with the prescribed regimen, promoting [Name]\'s health, wellbeing and clinical stability while minimising the risk of medication-related adverse events.'], iv: ['RN / trained worker administers from Webster pack [times].', 'Support worker / RN to administer or assist with medications from the Webster pack, following medication management policies and the six rights of medication administration (right client, medication, dose, route, time, and documentation).', 'Monitor for side effects, adverse reactions, medication refusals, or changes in health status and report concerns promptly to the RN, GP, or relevant healthcare professional.', '[Anticoagulant / insulin / opioid] — monitor and report [bleeding / hypo / sedation].', 'Ensure medications are stored safely and accessed according to prescribed instructions.', 'GP medication review 6-monthly.'], aids: ['Webster pack; BGL meter; sharps container'] }
+    },
+    pain: {
+      moderate: { goal: ['[Name] reports pain controlled at or below [3]/10 and continues daily activities.', 'To promote quality of life.', 'To manage pain effectively.'], iv: ['Regular analgesia as prescribed; monitor effect.', 'Non-pharmacological: heat / cold, positioning, gentle exercise.', 'Physio / remedial therapy [frequency] as funded.', 'Record pain score at each visit; report increase.', PAIN_MON], aids: ['Heat pack; TENS if prescribed'] },
+      severe: { goal: ['Pain is reduced to a level [Name] finds acceptable and sleep and function improve.', 'To promote quality of life.', 'To manage pain effectively.'], iv: [PAIN_MON, 'GP / pain clinic review within 2 weeks.', 'Pain chart; reassess with Pain Ax 4-weekly.', 'Opioid monitoring (bowels, sedation).', 'Allied health as funded [physio / acupuncture / remedial / chiro].'], aids: ['Heat pack; TENS if prescribed'] }
+    },
+    diabetes: {
+      oral: { goal: ['Blood glucose stays within the GP-set range and complications are prevented.'], iv: ['Encourage diabetic diet; dietitian referral.', 'BGL monitoring [frequency] if prescribed.', 'Foot check at each personal-care visit; podiatry [frequency].', 'Annual eye and kidney checks with GP.', 'Encourage regular physical activity appropriate to [Name]\'s health condition and abilities.', 'Encourage [Name] to attend regular medical reviews and diabetes-related health checks.'], aids: ['BGL meter; diabetic footwear'] },
+      insulin: { goal: ['Insulin is administered safely and hypo / hyperglycaemia is recognised and managed.'], iv: ['RN / trained worker administers insulin as per order and records the reading on the BGL chart.', 'Monitor for signs and symptoms of hypoglycaemia or hyperglycaemia and report concerns as required.', 'Monitor foot condition and report to the clinical team and GP any abnormal signs.', 'Encourage adherence to a balanced diet and adequate hydration to support diabetes management.', 'Encourage regular physical activity appropriate to [Name]\'s health condition and abilities.', 'Encourage [Name] to attend regular medical reviews and diabetes-related health checks.', 'Hypo kit in home; workers trained in hypo signs.', 'BGL before each dose; record and report outside range.', 'Diabetes educator review.'], aids: ['Insulin pen; BGL meter; hypo kit; sharps container'] }
+    },
+    social: {
+      present: { goal: ['[Name] stays connected with community and family and can attend appointments.'], iv: ['Individual social support [frequency]; group activity [day].', 'Accompanied activities / outings [frequency].', 'Transport to medical appointments and shopping [frequency].', 'Encourage phone / video contact with family.', 'Cultural / language-matched worker where possible.'], aids: ['Taxi subsidy; wheelchair-accessible transport'] }
+    }
+  };
+
+  /* ---- 3. Budget → provider / frequency (Section 3) ---- */
+  const PROVIDERS = [
+    [/nursing/i, 'RN — One Dream Community'],
+    [/self-?care|activities of daily living|social support|shopping|accompanied|meal preparation|respite|domestic/i, 'Support worker — One Dream Community'],
+    [/meal delivery/i, 'Meal provider [name]'],
+    [/physio|occupational|speech|remedial|acupunct|chiro|podiat|dietit|exercise physiol|psycholog/i, 'Allied health — [provider name]'],
+    [/cleaning|garden|home maintenance/i, 'Contractor — [name]'],
+    [/home modif|assistive tech|\bAT\b|mobility product|continence aid|equipment|goods/i, 'Care manager to arrange (once-off / as approved)'],
+    [/transport|travel/i, 'ODC transport / taxi']
+  ];
+  function providerFor(svc) { for (const p of PROVIDERS) if (p[0].test(svc)) return p[1]; return 'Provider to be confirmed'; }
+
+  /* ---- 4. Risk Alert / PEEP / Preventative (Section 4) ---- */
+  const RISKS = [
+    { id: 'falls', risk: 'Falls', when: function (D, L) { return L.mobility === 'moderate' || L.mobility === 'high'; }, action: 'Use [aid]; supervise transfers; personal alarm; physio review; report all falls to the RN the same day. RN to update FRAT, review mobility aids and home environment (yearly, after any fall, or when mobility changes).' },
+    { id: 'pressure', risk: 'Pressure injury / complex wound', when: function (D, L) { return L.skin === 'high'; }, action: 'Pressure mattress / cushion; 2-hourly repositioning; skin check each visit; separate wound chart; RN wound review weekly.' },
+    { id: 'choking', risk: 'Choking / aspiration', when: function (D, L, R) { return /aspiration/.test((R.nutrition || []).join(' ')); }, action: 'Upright for meals and 30 min after; prescribed texture only; supervise meals; speech pathology review. Review if the current diet is not suitable or after any aspiration / choking episode.' },
+    { id: 'hypo', risk: 'Hypoglycaemia', when: function (D, L) { return L.diabetes === 'insulin'; }, action: 'Hypo kit in home; workers know the signs; BGL before insulin; call 000 if unresponsive. Review after any hypoglycaemic episode.' },
+    { id: 'bleeding', risk: 'Bleeding', when: function (D) { return yes(D.ia_anticoagulant) || yes(D.med_anticoag); }, action: 'Report bruising, blood in urine / stool, nose bleeds; soft toothbrush; pressure on cuts for 10 minutes.' },
+    { id: 'wandering', risk: 'Wandering / getting lost', when: function (D, L) { return L.cognition === 'moderate' && (yes(D.ia_socialIsolation) || /confusion|restless/i.test(S(D.cog_shows))); }, action: 'Door sensor / GPS pendant; ID card; neighbours informed; police "safe return" registration.' },
+    { id: 'mederr', risk: 'Medication error', when: function (D, L) { return (L.medication === 'prompt' || L.medication === 'assist') && !!L.cognition; }, action: 'Webster pack only; prompt / administer per plan; pharmacist HMR; secure storage.' },
+    { id: 'isolation', risk: 'Social isolation', when: function (D, L) { return L.social === 'present' && (yes(D.ia_socialIsolation) || yes(D.ia_social_geo)); }, action: 'Weekly social support visit; welfare phone call; emergency contact list in home.' },
+    { id: 'manual', risk: 'Manual handling (worker)', when: function (D) { return /two|wheelchair|bed|hoist/i.test(S(D.ia_mobility_assist) + ' ' + S(D.mob_assist) + ' ' + S(D.mob_transfer) + ' ' + S(D.mob_aids)); }, action: 'Two workers rostered; equipment checked; no lifting without equipment.' },
+    { id: 'infection', risk: 'Infection (catheter / wound / enteral / stoma)', when: function (D, L) { return !!(L.catheter || L.enteral || L.stoma || L.skin === 'high'); }, action: 'Hand hygiene; daily site / catheter / stoma care; report fever, redness, odour the same day. Review when a device change is due (weekly, 4-weekly, 6-monthly or yearly).' }
+  ];
+  function peepFor(D, L) {
+    const a = S(D.ia_mobility_assist) || S(D.mob_assist);
+    const stay = 'Worker is to call 000 and remain with the client, provided it is safe to do so.';
+    if (/bed/i.test(a) || yes(D.ia_pegFeeding) || /oxygen/i.test(S(D.med_other) + S(D.med_others_summary))) return { lvl: 'Bed-bound / oxygen / medical equipment dependent', evac: 'Cannot self-evacuate. Oxygen cylinders shut off and removed if safe. Power-dependent equipment: battery backup and energy-provider life-support registration. ' + stay, equip: 'Oxygen; electric bed; hoist; backup power; medical equipment' };
+    if (/two|wheelchair/i.test(a) || L.mobility === 'high') return { lvl: 'Wheelchair / 2-person assist', evac: 'Cannot self-evacuate. Requires the assistance of [2] people. Register with the state fire service / SES vulnerable persons list. ' + stay, equip: 'Wheelchair; evacuation sheet' };
+    if (L.mobility === 'moderate' || L.mobility === 'low' || /1 person|one person/i.test(a)) return { lvl: 'Walks with aid', evac: 'Can evacuate slowly with [aid]. Keep the aid beside the bed at night. Neighbour / family to check in an emergency. ' + stay, equip: 'Walking aid; torch' };
+    return { lvl: 'Independent', evac: 'Can self-evacuate. Knows exits and assembly point. Phone kept charged and within reach.', equip: 'Nil' };
+  }
+  function preventativeFor(D, L) {
+    const a = age(D), out = ['Influenza vaccination — annual.', 'COVID-19 booster — per current ATAGI advice.'];
+    if (a == null || a >= 70 || (a >= 50 && yes(D.p_atsi))) out.push('Pneumococcal vaccination — confirm if recorded.');
+    if (a == null || a >= 65) out.push('Shingles (Shingrix) — confirm if recorded.');
+    const ticks = {}, notes = [];
+    notes.push('Dental check — annual and when necessary.');
+    notes.push('Optometry / eye check — annual' + (L.diabetes ? '; diabetes → annual retinal screen' : '') + '.');
+    if (L.diabetes) { ticks.cp_prev_pod = 1; ticks.cp_prev_opto = 1; notes.push('Podiatry — diabetes.'); }
+    if (L.communication && /hearing/.test((L.__r.communication || []).join(' '))) { ticks.cp_prev_audio = 1; notes.push('Audiology — hearing aid / hearing concern.'); }
+    if (L.mobility === 'high' || /fracture/i.test(S(D.mob_injuries_detail) + S(D.med_history))) notes.push('Bone density / falls clinic — FRAT high or fracture history, as per health professional referral.');
+    if (L.mobility === 'moderate' || L.mobility === 'high') ticks.cp_prev_physio = 1;
+    if (L.medication || L.cognition) notes.push('Home Medicines Review — polypharmacy or deteriorating cognition.');
+    if (L.cognition) notes.push('RUDAS — RN or GP to attend.');
+    if (L.nutrition) ticks.cp_prev_diet = 1;
+    if (L.nutrition === 'high') ticks.cp_prev_speech = 1;
+    notes.push('Bowel / breast / cervical screening reminder — per age range, GP to confirm.');
+    return { immun: out.join('\n'), checks: notes.join('\n'), ticks: ticks };
+  }
+
+  /* ---- 5. Edge rules (Section 1b) ---- */
+  const EDGE = {
+    none: function (D) { return 'No need identified at this assessment — continue to monitor and report to the Care Partner and RNs if any changes identified.'; },
+    incomplete: 'Assessment incomplete.',
+    budgetOnly: function (D) { return 'Funded service identified as per ' + name(D) + '\'s choices and preferences.'; },
+    noService: ['Refer to the Care Partner to review the identified care need and arrange appropriate support.', 'Family to support identified care needs if possible.']
+  };
+
+  /* ---- engine ---- */
+  function fillName(t, D) {
+    t = t.replace(/\[Name\]/g, name(D));
+    const aid = S(D.mob_aids) && !/^none$/i.test(S(D.mob_aids)) ? S(D.mob_aids).toLowerCase() : '';
+    if (aid) t = t.replace(/\[walking aid\]|\[aid\]/g, aid);
+    const a = S(D.ia_mobility_assist) || S(D.mob_assist);
+    if (/two/i.test(a)) t = t.replace(/\[1\/2\]|\[2\]/g, '2'); else if (/1 person|one person/i.test(a)) t = t.replace(/\[1\/2\]/g, '1');
+    if (S(D.p_language) && !/english/i.test(S(D.p_language))) t = t.replace(/\[language\]/g, '(' + S(D.p_language) + ')');
+    return t;
+  }
+  function budgetByDomain(D) {
+    const lines = (typeof macBudgetLines === 'function') ? macBudgetLines(D) : [];
+    const by = {};
+    lines.forEach(function (b) { (b.domains || [b.domain]).forEach(function (d) { (by[d] = by[d] || []).push(b); }); });
+    return { by: by, any: lines.length > 0 };
+  }
+  function detectAll(D) {
+    const L = { __r: {} };
+    Object.keys(DETECT).forEach(function (d) { const r = []; let lv = ''; try { lv = DETECT[d](D, r) || ''; } catch (e) { lv = ''; } L[d] = lv; L.__r[d] = r; });
+    return L;
+  }
+  function reviewText(D) {
+    const base = D.__cp_approved_at || Date.now();
+    return 'Review by ' + dmy(addMonths(base, REVIEW_MONTHS)) + ' (' + REVIEW_MONTHS + ' months from approval), or earlier if: new or updated assessment, new CareTok budget, new MAC Support Plan, fall, hospital admission, new wound, or a significant change reported by a worker.';
+  }
+
+  /* Write a value as engine text: only when the field is empty or still holds the engine's previous text */
+  function setDraft(D, draft, key, val, written) {
+    const cur = D[key] == null ? '' : (typeof D[key] === 'boolean' ? D[key] : String(D[key]));
+    const prev = draft[key];
+    const isAuto = (cur === '' || cur === false) || (prev != null && cur === prev);
+    if (!isAuto) return;
+    // keep an AI-drafted line that is still part of the field
+    const ai = D.__ai_draft && D.__ai_draft[key];
+    if (ai && typeof cur === 'string' && cur.indexOf(ai) !== -1 && val && typeof val === 'string' && val.indexOf(ai) === -1) val = /_intervention$/.test(key) ? val + '\n• ' + ai : val + '\n\n' + ai;
+    if (val === '' || val == null || val === false) { if (prev != null && cur === prev) { D[key] = typeof cur === 'boolean' ? false : ''; } delete draft[key]; return; }
+    if (cur !== val) { D[key] = val; written.push(key); }
+    draft[key] = val;
+  }
+
+  function generate(D) {
+    if (!D) return { written: [], levels: {}, flags: {} };
+    const draft = D.__mac_draft = D.__mac_draft || {};
+    const written = [];
+    const L = detectAll(D);
+    const B = budgetByDomain(D);
+    const flags = {};
+    const review = reviewText(D);
+    const mac = D.__mac;
+    function flag(d, kind, text) { (flags[d] = flags[d] || []).push({ kind: kind, text: text }); }
+
+    Object.keys(LABELS).forEach(function (d) {
+      const lv = L[d], reasons = L.__r[d] || [];
+      const budget = B.by[d] || [];
+      const manual = !!MANUAL[d] || (d === 'nutrition' && lv === 'high');
+      const K = function (f) { return 'cp_' + d + '_' + f; };
+
+      const needsFromAx = !!(D.__cp_auto && D.__cp_auto[K('needs')] != null && D.__cp_auto[K('needs')] === D[K('needs')] && D[K('needs')]);
+      if (!lv) {
+        // Not triggered. Budget-only → edge rule; otherwise "no need identified" (needs field only)
+        if (budget.length) {
+          if (!needsFromAx) setDraft(D, draft, K('needs'), EDGE.budgetOnly(D), written);
+          flag(d, 'budget', 'Funded service but no need found in the assessment (' + budget.map(function (b) { return b.text; }).join(', ') + ') — RN to confirm; no risk or support level assigned from funding alone.');
+          setDraft(D, draft, K('providers'), budget.map(function (b) { return providerFor(b.text) + ' — ' + b.text; }).join('\n'), written);
+          setDraft(D, draft, K('days'), budget.map(function (b) { return b.text + ': ' + b.freq; }).join('\n'), written);
+          setDraft(D, draft, K('review'), review, written);
+        } else {
+          if (!needsFromAx) setDraft(D, draft, K('needs'), EDGE.none(D), written);
+          ['goals', 'intervention', 'aids', 'providers', 'days', 'review'].forEach(function (f) { setDraft(D, draft, K(f), '', written); });
+        }
+        return;
+      }
+
+      // Triggered
+      if (reasons.length) flag(d, 'level', 'Level: ' + lv + ' — ' + reasons.join('; '));
+      if (B.any && !budget.length) flag(d, 'noservice', 'Need identified but no funded service in the current budget — ' + EDGE.noService.join(' '));
+      if (manual) {
+        flag(d, 'manual', 'Manual domain — RN writes the goals, interventions and aids for this level.');
+        ['goals', 'intervention', 'aids'].forEach(function (f) { setDraft(D, draft, K(f), '', written); });
+      } else {
+        const w = (W[d] || {})[lv];
+        if (w) {
+          setDraft(D, draft, K('goals'), w.goal.map(function (t) { return fillName(t, D); }).join('\n'), written);
+          setDraft(D, draft, K('intervention'), w.iv.map(function (t) { return '• ' + fillName(t, D); }).join('\n'), written);
+          setDraft(D, draft, K('aids'), (w.aids || []).join('\n'), written);
+        }
+      }
+      if (budget.length) {
+        setDraft(D, draft, K('providers'), budget.map(function (b) { return providerFor(b.text) + ' — ' + b.text; }).join('\n'), written);
+        setDraft(D, draft, K('days'), budget.map(function (b) { return b.text + ': ' + b.freq; }).join('\n'), written);
+        setDraft(D, draft, K('tasks'), budget.map(function (b) { return '• ' + b.text + ' — ' + (b.units ? b.units + ' ' : '') + b.freq + ' (package budget)'; }).join('\n'), written);
+      }
+      setDraft(D, draft, K('review'), review, written);
+    });
+
+    // Risk Alert rows (auto rows carry auto:1 and are replaced while unedited)
+    if (!Array.isArray(D.cp_risks)) D.cp_risks = [];
+    const keep = D.cp_risks.filter(function (r) { return !(r && r.auto && r.risk === r.autoRisk && r.action === r.autoAction); });
+    const manualRisks = keep.map(function (r) { return (r.risk || '').toLowerCase(); });
+    const dismissed = D.__cp_risk_dismissed || {};
+    RISKS.forEach(function (rk) {
+      let on = false; try { on = !!rk.when(D, L, L.__r); } catch (e) {}
+      if (!on || dismissed[rk.risk]) return;
+      if (manualRisks.some(function (m) { return m && rk.risk.toLowerCase().indexOf(m.split(' ')[0]) === 0; })) return; // RN already wrote this risk
+      keep.push({ risk: rk.risk, action: fillName(rk.action, D), auto: 1, autoRisk: rk.risk, autoAction: fillName(rk.action, D) });
+    });
+    // drop the single blank placeholder row if real rows exist
+    const rows = keep.filter(function (r) { return r && ((r.risk || '').trim() || (r.action || '').trim()); });
+    const changed = JSON.stringify(rows) !== JSON.stringify(D.cp_risks.filter(function (r) { return r && ((r.risk || '').trim() || (r.action || '').trim()); }));
+    D.cp_risks = rows.length ? rows : [{ risk: '', action: '' }];
+    if (changed) written.push('cp_risks');
+
+    // PEEP
+    const pp = peepFor(D, L);
+    setDraft(D, draft, 'cp_peep_mobility', pp.lvl + (S(D.mob_aids) ? ' — ' + S(D.mob_aids) : ''), written);
+    setDraft(D, draft, 'cp_peep_evac', pp.evac, written);
+    setDraft(D, draft, 'cp_peep_equip', pp.equip, written);
+    if (L.diabetes === 'insulin' || yes(D.ia_anticoagulant) || L.palliative) setDraft(D, draft, 'cp_peep_meds', [L.diabetes === 'insulin' ? 'Insulin + hypo kit' : '', yes(D.ia_anticoagulant) ? 'Anticoagulant' : '', L.palliative ? 'Palliative / crisis medications' : ''].filter(Boolean).join('; '), written);
+
+    // Preventative health
+    const pv = preventativeFor(D, L);
+    setDraft(D, draft, 'cp_prev_immunisation', pv.immun, written);
+    setDraft(D, draft, 'cp_prev_comp', pv.checks, written);
+    Object.keys(pv.ticks).forEach(function (k) { if (!D[k]) { D[k] = true; draft[k] = true; written.push(k); } });
+
+    D.__cp_levels = {}; Object.keys(LABELS).forEach(function (d) { if (L[d]) D.__cp_levels[d] = L[d]; });
+    D.__cp_flags = flags;
+    D.__cp_rules_at = Date.now();
+    return { written: written, levels: L, flags: flags };
+  }
+
+  /* Banner per domain card: level + reasons + flags */
+  function applyBanners() {
+    const D = state.data, root = document.getElementById('careplanContent'); if (!D || !root) return;
+    root.querySelectorAll('.cp-rule-banner').forEach(function (b) { b.remove(); });
+    const flags = D.__cp_flags || {};
+    Object.keys(flags).forEach(function (d) {
+      const card = root.querySelector('.cp-domain[data-cpdomain="' + d + '"]'); if (!card) return;
+      const items = flags[d];
+      const box = document.createElement('div');
+      box.className = 'cp-rule-banner no-print';
+      box.style.cssText = 'margin:6px 0 8px;padding:7px 10px;border-radius:6px;font-size:12px;line-height:1.45;background:#f4f7f0;border:1px solid #cfdac4';
+      box.innerHTML = items.map(function (f) {
+        const col = f.kind === 'manual' ? '#8a4b00' : f.kind === 'noservice' || f.kind === 'budget' ? '#9c2f2f' : '#2f5d3a';
+        const lab = f.kind === 'manual' ? 'MANUAL' : f.kind === 'noservice' ? 'NO FUNDED SERVICE' : f.kind === 'budget' ? 'BUDGET ONLY' : 'AUTO';
+        return '<div><strong style="color:' + col + '">' + lab + '</strong> — ' + f.text.replace(/</g, '&lt;') + '</div>';
+      }).join('');
+      const head = card.querySelector('.sec-head');
+      if (head) head.insertAdjacentElement('afterend', box); else card.prepend(box);
+    });
+  }
+
+  return { generate: generate, detect: detectAll, applyBanners: applyBanners, LABELS: LABELS, MANUAL: MANUAL, W: W, RISKS: RISKS, REVIEW_MONTHS: REVIEW_MONTHS, providerFor: providerFor, reviewText: reviewText };
+})();
+
+/* Run the engine on every Care Plan render (after the needs auto-fill) and push values into the rendered fields */
+function cpRulesRun() {
+  const D = state.data; if (!D) return [];
+  let res = { written: [] };
+  try { res = ODC_RULES.generate(D); } catch (e) { console.warn('rules', e); }
+  const root = document.getElementById('careplanContent');
+  if (root) {
+    Object.keys(D.__mac_draft || {}).forEach(function (k) {
+      const el = root.querySelector('[data-key="' + k + '"]'); if (!el) return;
+      if (el.type === 'checkbox') { if (el.checked !== !!D[k]) el.checked = !!D[k]; }
+      else if (el.value !== String(D[k] == null ? '' : D[k])) el.value = D[k] == null ? '' : D[k];
+    });
+  }
+  return res.written;
+}
+
+
+
+/* ---------- v3.3: Care Plan approval workflow (ODC_APPROVAL) ----------
+   Draft → RN review → Approved.
+   • Every engine / MAC / AI line carries a DRAFT tag with an Accept button; a
+     section's banner has "Accept all in this section". Approve is only enabled
+     when no DRAFT lines remain (confirmed rule: every line must be opened).
+   • Approve = RN name/date stamped into the signature block (the RN must have
+     signed) → status approved, version +1, snapshot of every cp_* field →
+     plan locked → entry in the client's Updates log → Teams card → the
+     "Save to client folder" dialog opens with one-click PDF filing.
+   • "Start new version" unlocks the plan; fields that differ from the approved
+     snapshot are highlighted CHANGED so the RN reads only what moved.
+   State on the record: __cp_status ('draft'|'approved'), __cp_version,
+   __cp_approved_at/by, __cp_snapshot {key:value, cp_risks:[…]}. */
+window.ODC_APPROVAL = (function () {
+  function D() { return state.data || {}; }
+  function user() { return (window.ODC_CLOUD && ODC_CLOUD.getUser && ODC_CLOUD.getUser()) || {}; }
+  function dmy(ms) { const t = new Date(ms); return ('0' + t.getDate()).slice(-2) + '/' + ('0' + (t.getMonth() + 1)).slice(-2) + '/' + t.getFullYear(); }
+  function esc(s) { return String(s == null ? '' : s).replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+  function root() { return document.getElementById('careplanContent'); }
+  function isApproved() { return D().__cp_status === 'approved'; }
+
+  /* ---- DRAFT bookkeeping ---- */
+  function draftKeysInDom() {
+    const d = D(), draft = d.__mac_draft || {}, r = root(); if (!r) return [];
+    return Object.keys(draft).filter(function (k) { const el = r.querySelector('[data-key="' + k + '"]'); if (!el) return false; const v = el.type === 'checkbox' ? el.checked : el.value; return String(v) === String(draft[k]); });
+  }
+  function autoRiskCount() { return (Array.isArray(D().cp_risks) ? D().cp_risks : []).filter(function (x) { return x && x.auto; }).length; }
+  function remaining() { return draftKeysInDom().length + autoRiskCount(); }
+  function accept(key) {
+    const d = D(); if (d.__mac_draft) delete d.__mac_draft[key];
+    const el = root() && root().querySelector('[data-key="' + key + '"]');
+    if (el) { el.style.boxShadow = ''; const t = el.nextElementSibling; if (t && t.classList.contains('mac-draft-tag')) t.remove(); }
+    autoSave(); refreshBar();
+  }
+  function acceptDomain(dom) {
+    const d = D(), r = root(); if (!r) return;
+    const card = dom === '__risks' ? null : r.querySelector('.cp-domain[data-cpdomain="' + dom + '"], .card[data-cpdomain="' + dom + '"]');
+    if (dom === '__risks') { (d.cp_risks || []).forEach(function (x) { if (x && x.auto) { delete x.auto; delete x.autoRisk; delete x.autoAction; } }); renderRiskList(); }
+    else if (card) card.querySelectorAll('[data-key]').forEach(function (el) { const k = el.dataset.key; if (d.__mac_draft && d.__mac_draft[k] != null) delete d.__mac_draft[k]; });
+    autoSave(); decorate(); refreshBar();
+  }
+  function acceptAll() {
+    const d = D(); d.__mac_draft = {}; (d.cp_risks || []).forEach(function (x) { if (x && x.auto) { delete x.auto; delete x.autoRisk; delete x.autoAction; } });
+    renderRiskList(); autoSave(); decorate(); refreshBar();
+  }
+
+  /* ---- decorate: Accept buttons on tags, section accept buttons, CHANGED highlights, lock ---- */
+  function decorate() {
+    const r = root(), d = D(); if (!r) return;
+    if (typeof macApplyDraftTags === 'function') macApplyDraftTags();
+    r.querySelectorAll('.mac-draft-tag').forEach(function (tag) {
+      if (tag.querySelector('button')) return;
+      const el = tag.previousElementSibling; const key = el && el.dataset ? el.dataset.key : '';
+      if (!key) return;
+      const b = document.createElement('button'); b.type = 'button'; b.textContent = '✓ Accept'; b.title = 'Keep this wording as reviewed';
+      b.style.cssText = 'margin-left:6px;font-size:10px;padding:0 6px;border:1px solid #d4a017;border-radius:3px;background:#fff;color:#6b4e00;cursor:pointer';
+      b.addEventListener('click', function () { accept(key); });
+      tag.appendChild(b);
+    });
+    // section "Accept all" in the rule banner (or a small bar when there is no banner)
+    r.querySelectorAll('.cp-domain[data-cpdomain]').forEach(function (card) {
+      const dom = card.dataset.cpdomain;
+      const n = Array.from(card.querySelectorAll('[data-key]')).filter(function (el) { const k = el.dataset.key; return d.__mac_draft && d.__mac_draft[k] != null && String(el.type === 'checkbox' ? el.checked : el.value) === String(d.__mac_draft[k]); }).length;
+      let bar = card.querySelector('.cp-accept-bar');
+      if (!n) { if (bar) bar.remove(); return; }
+      if (!bar) { bar = document.createElement('div'); bar.className = 'cp-accept-bar no-print'; bar.style.cssText = 'display:flex;justify-content:flex-end;margin:0 0 6px'; const head = card.querySelector('.cp-rule-banner') || card.querySelector('.sec-head'); if (head) head.insertAdjacentElement('afterend', bar); else card.prepend(bar); }
+      bar.innerHTML = '<button type="button" class="mini-btn" data-acceptdom="' + dom + '">✓ Accept all ' + n + ' DRAFT line' + (n === 1 ? '' : 's') + ' in this section</button>';
+      bar.querySelector('button').addEventListener('click', function () { acceptDomain(dom); });
+    });
+    const riskCard = r.querySelector('[data-cpdomain="risk"]');
+    if (riskCard) {
+      let bar = riskCard.querySelector('.cp-accept-bar'); const n = autoRiskCount();
+      if (!n) { if (bar) bar.remove(); }
+      else { if (!bar) { bar = document.createElement('div'); bar.className = 'cp-accept-bar no-print'; bar.style.cssText = 'display:flex;justify-content:flex-end;margin:0 0 6px'; riskCard.querySelector('.sec-head').insertAdjacentElement('afterend', bar); } bar.innerHTML = '<button type="button" class="mini-btn">✓ Accept all ' + n + ' DRAFT risk row' + (n === 1 ? '' : 's') + '</button>'; bar.querySelector('button').addEventListener('click', function () { acceptDomain('__risks'); }); }
+    }
+    // CHANGED since last approval
+    r.querySelectorAll('.cp-changed-tag').forEach(function (t) { t.remove(); });
+    r.querySelectorAll('.cp-changed').forEach(function (el) { el.classList.remove('cp-changed'); });
+    const snap = d.__cp_snapshot;
+    if (snap && !isApproved()) {
+      const when = d.__cp_approved_at ? dmy(d.__cp_approved_at) : '';
+      r.querySelectorAll('[data-key^="cp_"]').forEach(function (el) {
+        const k = el.dataset.key; if (/^cp_sig_/.test(k)) return;
+        const cur = el.type === 'checkbox' ? !!el.checked : String(el.value || '');
+        const old = el.type === 'checkbox' ? !!snap[k] : String(snap[k] == null ? '' : snap[k]);
+        if (cur === old) return;
+        el.classList.add('cp-changed');
+        const t = document.createElement('span'); t.className = 'cp-changed-tag no-print';
+        t.style.cssText = 'display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;color:#7a3e00;background:#fff1dc;border:1px solid #e0a052;border-radius:3px;padding:1px 6px;margin:4px 6px 0 0';
+        t.textContent = 'CHANGED since approval' + (when ? ' ' + when : '') + (old && el.type !== 'checkbox' ? ' — was: ' + (old.length > 90 ? old.slice(0, 90) + '…' : old) : '');
+        el.insertAdjacentElement('afterend', t);
+      });
+      if (JSON.stringify((snap.cp_risks || []).map(function (x) { return [x.risk, x.action]; })) !== JSON.stringify((d.cp_risks || []).map(function (x) { return [x.risk, x.action]; }))) {
+        const rc = r.querySelector('[data-cpdomain="risk"] .sec-head'); if (rc && !rc.querySelector('.cp-changed-tag')) { const t = document.createElement('span'); t.className = 'cp-changed-tag no-print'; t.style.cssText = 'font-size:10px;font-weight:700;color:#7a3e00;background:#fff1dc;border:1px solid #e0a052;border-radius:3px;padding:1px 6px;margin-left:8px'; t.textContent = 'RISK ROWS CHANGED since approval'; rc.appendChild(t); }
+      }
+    }
+    // lock
+    r.classList.toggle('cp-locked', isApproved());
+    // print line in the snapshot card
+    const sc = r.querySelector('[data-cpdomain="snapshot"] .sec-head');
+    if (sc) {
+      let line = r.querySelector('.cp-approval-line'); if (!line) { line = document.createElement('p'); line.className = 'cp-approval-line subtitle'; sc.insertAdjacentElement('afterend', line); }
+      if (d.__cp_approved_at) {
+        const next = new Date(d.__cp_approved_at); next.setMonth(next.getMonth() + ((window.ODC_RULES && ODC_RULES.REVIEW_MONTHS) || 12));
+        line.innerHTML = '<strong>Care Plan v' + (d.__cp_version || 1) + '</strong> — ' + (isApproved() ? 'approved' : 'last approved') + ' ' + dmy(d.__cp_approved_at) + (d.__cp_approved_by ? ' by ' + esc(d.__cp_approved_by) : '') + ' · <strong>Next full review by ' + dmy(next.getTime()) + '</strong> (or earlier on hospital admission / discharge, new budget, new MAC Support Plan, change of carer or living arrangement, or client / family request).' + (!isApproved() ? ' <em>Revision in progress — not yet approved.</em>' : '');
+      } else line.innerHTML = '<em>Draft — not yet approved by an RN.</em>';
+    }
+    refreshBar();
+  }
+
+  /* ---- status bar ---- */
+  function refreshBar() {
+    const r = root(), d = D(); if (!r) return;
+    let bar = document.getElementById('cpStatusBar');
+    if (!bar) { bar = document.createElement('div'); bar.id = 'cpStatusBar'; bar.className = 'no-print'; bar.style.cssText = 'position:sticky;top:0;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:10px;margin:0 0 12px;padding:10px 14px;border-radius:8px;border:1px solid #cfdac4;background:#fbfcf9;box-shadow:0 2px 6px rgba(0,0,0,.05)'; r.prepend(bar); }
+    const n = remaining(); const approved = isApproved();
+    const badge = approved ? '<span style="font-weight:700;color:#fff;background:#2f5d3a;border-radius:999px;padding:3px 10px">APPROVED v' + (d.__cp_version || 1) + ' · ' + dmy(d.__cp_approved_at) + (d.__cp_approved_by ? ' · ' + esc(d.__cp_approved_by) : '') + '</span>'
+      : '<span style="font-weight:700;color:#6b4e00;background:#fff8e1;border:1px solid #d4a017;border-radius:999px;padding:3px 10px">DRAFT' + (d.__cp_version ? ' — revising v' + d.__cp_version : '') + '</span>';
+    const cnt = approved ? '' : (n ? '<span style="color:#9c2f2f">' + n + ' DRAFT line' + (n === 1 ? '' : 's') + ' to review</span>' : '<span style="color:#2f5d3a">All DRAFT lines reviewed</span>');
+    const sig = d.cp_sig_rn ? '' : '<span style="color:#9c2f2f">RN signature missing</span>';
+    bar.innerHTML = badge + cnt + (approved ? '' : sig) + '<span style="flex:1"></span>' +
+      (approved ? '<button type="button" class="btn ghost" id="cpNewVersion">✎ Start new version</button><button type="button" class="btn ghost" id="cpReFile">⚡ File PDF again</button>'
+        : '<button type="button" class="btn" id="cpApprove"' + (n || !d.cp_sig_rn ? ' disabled title="Review every DRAFT line and sign as RN first"' : '') + '>✅ Approve &amp; file</button>');
+    const a = document.getElementById('cpApprove'); if (a) a.addEventListener('click', approve);
+    const aa = document.getElementById('cpAcceptAll'); if (aa) aa.addEventListener('click', function () { if (confirm('Mark all ' + n + ' remaining DRAFT lines as reviewed without opening them one by one?')) acceptAll(); });
+    const nv = document.getElementById('cpNewVersion'); if (nv) nv.addEventListener('click', newVersion);
+    const rf = document.getElementById('cpReFile'); if (rf) rf.addEventListener('click', function () { if (window.ODC_FILES_UI) ODC_FILES_UI.open(false); });
+  }
+
+  /* ---- approve ---- */
+  function snapshot() {
+    const d = D(), s = {};
+    Object.keys(d).forEach(function (k) { if (k.indexOf('cp_') === 0) s[k] = (k === 'cp_risks') ? JSON.parse(JSON.stringify(d[k] || [])) : d[k]; });
+    return s;
+  }
+  async function approve() {
+    const d = D(), u = user();
+    if (!u || !(u.name || u.email)) { alert('Sign in first.'); return; }
+    if (!d.cp_sig_rn) { alert('The Registered Nurse must sign in the signature box at the end of the Care Plan before approving.'); const s = root().querySelector('[data-sigwrap="cp_sig_rn"]'); if (s) s.scrollIntoView({ behavior: 'smooth', block: 'center' }); return; }
+    const n = remaining(); if (n) { alert(n + ' DRAFT line(s) still need to be reviewed (Accept or edit each one).'); return; }
+    const ver = (d.__cp_version || 0) + 1;
+    if (!confirm('Approve this Care Plan as version ' + ver + '?\n\nThe plan will be locked, logged in Updates, a Teams notice sent, and the PDF filing dialog opened.')) return;
+    const now = Date.now();
+    if (!d.cp_sig_rn_name) d.cp_sig_rn_name = u.name || u.email;
+    d.cp_sig_rn_date = dmy(now);
+    d.__cp_status = 'approved'; d.__cp_version = ver; d.__cp_approved_at = now; d.__cp_approved_by = u.name || u.email;
+    d.__cp_approved_log = (d.__cp_approved_log || []).concat([{ v: ver, at: now, by: d.__cp_approved_by }]);
+    // the review dates now count from the approval date
+    try { if (window.ODC_RULES) { const rt = ODC_RULES.reviewText(d); Object.keys(d).forEach(function (k) { if (/^cp_[a-z]+_review$/.test(k) && /^Review by \d\d\/\d\d\/\d{4} \(/.test(String(d[k] || ''))) d[k] = String(d[k]).replace(/^Review by \d\d\/\d\d\/\d{4} \([^)]*\)/, rt.match(/^Review by \d\d\/\d\d\/\d{4} \([^)]*\)/)[0]); }); } } catch (e) {}
+    d.__cp_snapshot = snapshot();
+    try { if (window.ODC_AI) ODC_AI.learn(d).then(function (k) { if (k) console.log('AI examples saved: ' + k); }); } catch (e) {}
+    // Updates log
+    try {
+      if (!Array.isArray(state.updates)) state.updates = [];
+      const changed = d.__cp_prev_snapshot ? Object.keys(d.__cp_snapshot).filter(function (k) { return JSON.stringify(d.__cp_snapshot[k]) !== JSON.stringify(d.__cp_prev_snapshot[k]); }).length : 0;
+      state.updates.unshift({ id: 'u_' + now.toString(36) + Math.random().toString(36).slice(2, 7), title: 'Care Plan approved — v' + ver, category: 'Care Plan', section: 'Care Plan', whatChanged: ver === 1 ? 'First approved version of the Care Plan.' : changed + ' field(s) changed since v' + (ver - 1) + '.', reason: 'RN review and approval', status: 'Approved', by: d.__cp_approved_by, byEmail: u.email || '', at: now, approvedBy: u.email || d.__cp_approved_by, approvedAt: now });
+    } catch (e) {}
+    autoSave();
+    renderCarePlan();
+    // Teams card (best effort)
+    try {
+      const hook = ((window.ODC_CLOUD_CONFIG || {}).teamsWebhookUrl || '').trim();
+      if (hook) fetch(hook, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ type: 'message', attachments: [{ contentType: 'application/vnd.microsoft.card.adaptive', content: { '$schema': 'http://adaptivecards.io/schemas/adaptive-card.json', type: 'AdaptiveCard', version: '1.4', body: [{ type: 'TextBlock', size: 'Large', weight: 'Bolder', text: '✅ Care Plan approved — ' + (d.p_name || d.p_preferred || 'client') }, { type: 'TextBlock', wrap: true, text: 'Version ' + ver + ' approved by **' + d.__cp_approved_by + '** on ' + dmy(now) + '. Next full review by ' + (function () { const t = new Date(now); t.setMonth(t.getMonth() + 12); return dmy(t.getTime()); })() + '.' }] } }] }) }).catch(function () {});
+    } catch (e) {}
+    // PDF filing
+    if (window.ODC_FILES_UI) { ODC_FILES_UI.open(false); setTimeout(function () { const b = document.getElementById('spMake'); if (b && !b.disabled) b.click(); }, 1200); }
+  }
+  function newVersion() {
+    const d = D();
+    if (!confirm('Start a new version of this Care Plan? The approved v' + (d.__cp_version || 1) + ' stays on file; fields you change will be highlighted for the next RN approval.')) return;
+    d.__cp_prev_snapshot = d.__cp_snapshot;
+    d.__cp_status = 'draft';
+    autoSave(); renderCarePlan();
+  }
+
+  return { decorate: decorate, refreshBar: refreshBar, approve: approve, newVersion: newVersion, accept: accept, acceptDomain: acceptDomain, remaining: remaining, isApproved: isApproved };
+})();
+
+
+
+/* ---------- v3.3: AI free-text drafting (ODC_AI) ----------
+   Azure OpenAI (Australia East) behind the same Azure Function as the PDF
+   service (POST /api/draft, same Pdf.Render token). Only the free-text parts
+   are drafted: the "Care needs, choice and preferences" paragraph, ONE
+   individualised intervention line per domain, and the preference summary in
+   the snapshot. Everything else stays rule-based.
+   • Input is de-identified here before it leaves the browser: the client's
+     name (all tokens), preferred name, DOB, address, phone, email, MAC ID.
+   • Output is written as DRAFT (same tag / Accept flow), remembered in
+     D.__ai_draft {key: text}.
+   • Learning: on approval, every AI-drafted field is saved as a de-identified
+     {domain, field, level, draft, final} example in the CarePlan site drive
+     (careplan-ai-examples.json). The next request sends the 3 newest examples
+     per domain so the model matches the RN's own voice. */
+window.ODC_AI = (function () {
+  const EXAMPLES_PATH = '/drive/root:/careplan-ai-examples.json';
+  const MAX_EXAMPLES = 400;
+  function cfg() { const c = (window.ODC_CLOUD_CONFIG || {}).pdfService || {}; return { url: (c.url || '').replace(/\/render$/, '/draft'), scope: c.scope }; }
+  function S(v) { if (v == null || v === false) return ''; if (v === true) return 'Yes'; return Array.isArray(v) ? v.join(', ') : String(v).trim(); }
+  function esc(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
+  /* ---- de-identification ---- */
+  function scrubber(D) {
+    const names = [];
+    [D.p_name, D.p_preferred, D.nok1_name, D.nok2_name, D.icp_name].forEach(function (n) { S(n).split(/[\s,]+/).forEach(function (t) { if (t.length >= 3 && !/^(mr|mrs|ms|miss|dr|the|and)$/i.test(t)) names.push(t); }); });
+    const res = names.length ? new RegExp('\\b(' + names.map(esc).join('|') + ')\\b', 'gi') : null;
+    const addr = [];
+    [D.p_address, D.p_street, D.p_suburb].forEach(function (a) { a = S(a); if (a.length >= 4) addr.push(a); a.split(/[\s,]+/).forEach(function (t) { if (t.length >= 4 && !/^\d+$/.test(t) && !/^(street|road|avenue|drive|court|place|unit|level|suite|nsw|vic|qld|australia)$/i.test(t)) addr.push(t); }); });
+    if (S(D.p_postcode)) addr.push(S(D.p_postcode));
+    const ares = addr.length ? new RegExp('(' + addr.map(esc).join('|') + ')', 'gi') : null;
+    return function (t) {
+      t = S(t);
+      if (res) t = t.replace(res, 'the client');
+      t = t.replace(/\b(Mr|Mrs|Ms|Miss|Dr)\.?\s+the client/gi, 'the client').replace(/the client\s*\(\s*(?:the client[\s,]*)+\)/g, 'the client').replace(/(?:the client[\s,]+){2,}the client/g, 'the client').replace(/(?:the client\s+){2,}/g, 'the client ');
+      if (ares) t = t.replace(ares, '[address]');
+      return t.replace(/\b\d{4}-\d{2}-\d{2}\b/g, '[date]').replace(/\b\d{1,2}\/\d{1,2}\/\d{4}\b/g, '[date]')
+        .replace(/\b(?:\+?61|0)[2-478](?:[ -]?\d){8}\b/g, '[phone]').replace(/\b[\w.+-]+@[\w-]+\.[\w.]+\b/g, '[email]')
+        .replace(/\bAC\d{8}\b/g, '[MAC ID]').replace(/\b\d{4}\s?\d{5}\s?\d\b/g, '[medicare]');
+    };
+  }
+
+  /* ---- per-domain source material ---- */
+  const SRC = {
+    nutrition: { notes: ['ia_nutrition_notes', 'nu_dietary', 'nu_diet_other', 'mna_food_access', 'nu_weight_change_detail', 'ch_eat_assist'], pref: ['nu_pref'] },
+    hygiene: { notes: ['ia_hygiene_notes', 'hyg_areas', 'hyg_help', 'hyg_support'], pref: ['hyg_pref'] },
+    mobility: { notes: ['ia_mobility_notes', 'mob_fall_detail', 'mob_injuries_detail', 'frat_history', 'mob_exercise'], pref: ['mob_pref'] },
+    continence: { notes: ['ia_continence_notes', 'cont_problem', 'cont_history', 'cont_action'], pref: ['cont_pref'] },
+    behaviour: { notes: ['ia_behaviour_notes', 'mh_diagnosed_detail', 'mh_triggers_detail', 'beh_risks', 'beh_strategies'], pref: ['mh_pref'] },
+    cognition: { notes: ['cog_diagnosed_detail', 'cog_notes', 'ch_memory_specify', 'ch_cog_specify', 'med_dementia_detail'], pref: ['cog_pref'] },
+    communication: { notes: ['comm_speech_detail', 'comm_assistive_detail', 'comm_notes', 'ch_devices'], pref: [] },
+    skin: { notes: ['ia_skin_notes', 'skin_notes', 'skin_management', 'skin_locations', 'wound_cause', 'wound_progress'], pref: ['skin_pref'] },
+    medication: { notes: ['ia_med_notes', 'med_notes', 'mm_history_detail', 'dm_med_notes'], pref: ['mm_pref'] },
+    pain: { notes: ['ia_pain_notes', 'pain_today', 'pain_treatment', 'pain_strategies'], pref: ['pain_pref'] },
+    diabetes: { notes: ['ia_diabetes_notes', 'dm_history_detail', 'dm_med_notes', 'dm_goal'], pref: ['dm_pref'] },
+    enteral: { notes: ['nu_enteral_notes'], pref: [] },
+    catheter: { notes: ['cont_support', 'ia_continence_notes'], pref: ['cont_pref'] },
+    stoma: { notes: ['cont_stoma_which', 'cont_support'], pref: ['cont_pref'] },
+    palliative: { notes: ['med_terminal', 'pal_pain', 'pal_emot_client', 'pal_emot_family', 'pal_spiritual', 'acd_notes'], pref: [] },
+    home: { notes: ['ia_home_notes'], pref: [] },
+    social: { notes: ['ia_social_notes', 'ia_transport_notes', 'social_staying', 'ia_social_clubs'], pref: [] }
+  };
+  function macGoalsFor(D, dom) {
+    const mac = D.__mac; if (!mac || !mac.goals || !window.ODC_MAC_MAP) return [];
+    return mac.goals.filter(function (g) { const ds = ODC_MAC_MAP.textDomains((g.goal || '') + ' ' + (g.concern || ''), 3); return ds.indexOf(dom) !== -1; }).map(function (g) { return g.goal; }).filter(Boolean);
+  }
+  function servicesFor(D, dom) {
+    const lines = (typeof macBudgetLines === 'function') ? macBudgetLines(D) : [];
+    return lines.filter(function (b) { return (b.domains || [b.domain]).indexOf(dom) !== -1; }).map(function (b) { return b.text + ' — ' + b.freq; });
+  }
+
+  /* ---- examples store (SharePoint CarePlan site drive) ---- */
+  async function loadExamples() {
+    try { if (!window.ODC_CLOUD || !ODC_CLOUD.graph || !ODC_CLOUD.siteId) return []; const j = await ODC_CLOUD.graph('/sites/' + ODC_CLOUD.siteId + EXAMPLES_PATH + ':/content'); return Array.isArray(j) ? j : (j && j.examples) || []; } catch (e) { return []; }
+  }
+  async function saveExamples(list) {
+    try { if (!window.ODC_CLOUD || !ODC_CLOUD.graph || !ODC_CLOUD.siteId) return; await ODC_CLOUD.graph('/sites/' + ODC_CLOUD.siteId + EXAMPLES_PATH + ':/content', { method: 'PUT', body: { updatedAt: new Date().toISOString(), examples: list.slice(0, MAX_EXAMPLES) } }); } catch (e) { console.warn('AI examples not saved', e); }
+  }
+  function pickExamples(all, dom, field, n) { return all.filter(function (e) { return e.domain === dom && e.field === field; }).slice(0, n || 3).map(function (e) { return { field: e.field, draft: e.draft, final: e.final }; }); }
+
+  /* ---- build request ---- */
+  function buildRequest(D, levels, examples) {
+    const scrub = scrubber(D);
+    const flags = D.__cp_flags || {};
+    const domains = [];
+    Object.keys(levels).forEach(function (dom) {
+      const lv = levels[dom]; if (!lv) return;
+      const src = SRC[dom] || { notes: [], pref: [] };
+      const notes = src.notes.map(function (k) { return S(D[k]); }).filter(Boolean).join('\n');
+      const pref = src.pref.map(function (k) { return S(D[k]); }).filter(Boolean).join('\n');
+      const reasons = (flags[dom] || []).filter(function (f) { return f.kind === 'level'; }).map(function (f) { return f.text.replace(/^Level: \w+ — /, ''); });
+      domains.push({ domain: dom, label: (ODC_RULES.LABELS || {})[dom] || dom, level: lv, reasons: reasons.map(scrub), notes: scrub(notes), goals: macGoalsFor(D, dom).map(scrub), services: servicesFor(D, dom).map(scrub), preference: scrub(pref),
+        examples: pickExamples(examples, dom, 'needs', 2).concat(pickExamples(examples, dom, 'intervention', 1)) });
+    });
+    const prefNotes = Object.keys(SRC).map(function (d) { return SRC[d].pref.map(function (k) { return S(D[k]); }).filter(Boolean).join(' '); }).filter(Boolean);
+    return { domains: domains, preferenceSummary: { background: scrub(D.p_background), notes: prefNotes.map(scrub) } };
+  }
+
+  /* ---- apply reply as DRAFT ---- */
+  function reName(t, D) { const n = S(D.p_preferred) || S(D.p_name); return n ? t.replace(/\bthe client\b/g, n).replace(/\bThe client\b/g, n) : t; }
+  function apply(D, reply) {
+    const draft = D.__mac_draft = D.__mac_draft || {};
+    const ai = D.__ai_draft = D.__ai_draft || {};
+    const written = [];
+    function put(key, text, mode) {
+      if (!text) return;
+      text = reName(text, D);
+      const cur = D[key] == null ? '' : String(D[key]);
+      const isAuto = !cur.trim() || draft[key] === cur || (D.__cp_auto && D.__cp_auto[key] === cur);
+      if (!isAuto && mode !== 'append') return;
+      let val;
+      if (mode === 'append') { if (cur.indexOf(text) !== -1) return; if (!isAuto && !/(^|\n)• /.test(cur)) return; val = (cur ? cur.replace(/\s+$/, '') + '\n' : '') + '• ' + text; }
+      else if (mode === 'needs') { const prev = ai[key] && cur.indexOf(ai[key]) !== -1 ? cur.replace(ai[key], '').replace(/\n{2,}$/, '\n') : cur; const base = prev.trim(); val = base && !/^(No need identified|Funded service identified|Assessment incomplete)/.test(base) ? base + '\n\n' + text : text; }
+      else val = text;
+      if (val === cur) return;
+      D[key] = val; draft[key] = val; ai[key] = text; written.push(key);
+    }
+    const doms = (reply && reply.domains) || {};
+    Object.keys(doms).forEach(function (dom) {
+      put('cp_' + dom + '_needs', doms[dom].needs, 'needs');
+      put('cp_' + dom + '_intervention', doms[dom].intervention, 'append');
+    });
+    if (reply && reply.preferenceSummary) put('cp_snap_preferences', reply.preferenceSummary, 'set');
+    D.__ai_draft_at = Date.now();
+    return written;
+  }
+
+  /* ---- main ---- */
+  async function draft(opts) {
+    opts = opts || {};
+    const D = state.data; if (!D) return { written: [], error: 'No client open' };
+    const c = cfg(); if (!c.url) return { written: [], error: 'AI service not configured' };
+    if (D.__cp_status === 'approved') return { written: [], error: 'Plan is approved — start a new version first' };
+    const levels = D.__cp_levels || {};
+    if (!Object.keys(levels).length) return { written: [], error: 'No domain has been triggered yet — complete the assessments first' };
+    const examples = await loadExamples();
+    const body = buildRequest(D, levels, examples);
+    const token = await ODC_CLOUD.getTokenFor([c.scope]);
+    const r = await fetch(c.url, { method: 'POST', headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    if (!r.ok) { let msg = 'AI service error ' + r.status; try { const j = await r.json(); if (j && j.error) msg += ' — ' + j.error; } catch (e) {} throw new Error(msg); }
+    const reply = await r.json();
+    const written = apply(D, reply);
+    return { written: written, reply: reply };
+  }
+
+  /* ---- learning: called on approval ---- */
+  async function learn(D) {
+    const ai = D && D.__ai_draft; if (!ai || !Object.keys(ai).length) return 0;
+    const scrub = scrubber(D);
+    const n = S(D.p_preferred) || S(D.p_name);
+    const unName = function (t) { return scrub(n ? String(t).replace(new RegExp('\\b' + esc(n) + '\\b', 'g'), 'the client') : t); };
+    const all = await loadExamples();
+    let added = 0;
+    Object.keys(ai).forEach(function (key) {
+      const m = key.match(/^cp_([a-z]+)_(needs|intervention)$/); const field = m ? m[2] : (key === 'cp_snap_preferences' ? 'preference' : ''); const dom = m ? m[1] : 'snapshot';
+      if (!field) return;
+      const final = S(D[key]); if (!final) return;
+      // keep only the part of the final text that corresponds to the AI line (needs paragraph / bullet)
+      let fin = final;
+      if (field === 'needs') { const parts = final.split(/\n\n+/); fin = parts[parts.length - 1]; }
+      if (field === 'intervention') { const lines = final.split('\n').filter(Boolean); fin = lines[lines.length - 1].replace(/^•\s*/, ''); }
+      all.unshift({ domain: dom, field: field, level: (D.__cp_levels || {})[dom] || '', draft: unName(ai[key]), final: unName(fin), at: new Date().toISOString(), by: (D.__cp_approved_by || '') });
+      added++;
+    });
+    if (added) await saveExamples(all);
+    return added;
+  }
+
+  return { draft: draft, learn: learn, apply: apply, buildRequest: buildRequest, scrubber: scrubber };
 })();
 
 
@@ -6874,8 +7764,8 @@ window.ODC_LEGACY = (function () {
     mapped.forEach(function (m) {
       Object.keys(m.set).forEach(function (k) {
         if (k === '__risk0') { if (!Array.isArray(D.cp_risks)) D.cp_risks = []; const blank = D.cp_risks.filter(function (r) { return (r.risk || '').trim() || (r.action || '').trim(); }).length === 0; if (blank) { D.cp_risks = [m.set.__risk0]; n++; } return; }
-        const autoCp = D.__cp_auto && D.__cp_auto[k] != null && D.__cp_auto[k] === D[k]; // auto-filled from Initial Ax — last year's form wins
-        if (empty(D[k]) || autoCp) { D[k] = m.set[k]; filled[k] = m.set[k]; if (autoCp) delete D.__cp_auto[k]; n++; }
+        const autoCp = (D.__cp_auto && D.__cp_auto[k] != null && D.__cp_auto[k] === D[k]) || (D.__mac_draft && D.__mac_draft[k] != null && D.__mac_draft[k] === D[k]); // auto / engine text — last year's form wins
+        if (empty(D[k]) || autoCp) { D[k] = m.set[k]; filled[k] = m.set[k]; if (autoCp) { if (D.__cp_auto) delete D.__cp_auto[k]; if (D.__mac_draft) delete D.__mac_draft[k]; } n++; }
       });
       Object.keys(m.add).forEach(function (k) {
         if (empty(D[k])) { D[k] = m.add[k].slice(); filled[k] = D[k].slice(); n++; }
