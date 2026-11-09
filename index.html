@@ -18,8 +18,15 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.4.3 (9 Nov 2026)
+     APP VERSION: v3.4.4 (9 Nov 2026)
      Version history:
+       v3.4.4 — MAC Support Plan import (Sue, 9 Nov): only the red "Your
+              assessment summary" box is written into the Care Plan, each
+              sub-heading to its category as the care need; goals, recommended
+              services, approvals and budget lines from the plan are no longer
+              copied in (still visible in the reference panel). A DRAFT line the
+              RN clears now stays empty (__cp_dismissed) instead of being
+              regenerated on the next render.
        v3.4.3 — "Hand over to RN" buttons removed from the Initial / Annual
               Assessment: RNs do the assessments themselves, so the hand-over
               is the "New client" notice at agreement signing. Coordinators'
@@ -1272,7 +1279,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.4.3</span>
+    <span class="badge">Cloud · v3.4.4</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1854,7 +1861,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.4.3"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.4.4"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -3465,6 +3472,7 @@ function restoreSignature(key) {
 }
 function onInput(el) {
   const key = el.dataset.key;
+  try { if (state.data && state.data.__cp_dismissed && state.data.__cp_dismissed[key] && String(el.type === 'checkbox' ? el.checked : el.value).trim()) delete state.data.__cp_dismissed[key]; } catch (e) {}
   let val;
   if (el.type === 'checkbox') val = el.checked ? 1 : 0;
   else {
@@ -6361,7 +6369,6 @@ function macGenerateDraft(D, opts) {
   const today = _macToday();
   const srcDate = mac.generatedOn || mac.assessedOn || '';
   const srcTag = 'MAC Support Plan' + (srcDate ? ' ' + srcDate : '');
-  const x = macCrossCheck(D) || { recs: [], budget: [], hasBudget: false };
   const dom = (mac.summary && mac.summary.domains) || {};
   const perDom = {};
   function bucket(d) { return perDom[d] = perDom[d] || { goals: [], needs: [], intervention: [], tasks: [], providers: [], days: [], aids: [] }; }
@@ -6369,79 +6376,16 @@ function macGenerateDraft(D, opts) {
   document.querySelectorAll('#careplanContent .cp-domain[data-cpdomain]').forEach(function (c) { shown[c.dataset.cpdomain] = true; });
   function tgt(d) { return shown[d] ? d : (d === 'cognition' || d === 'communication' ? 'behaviour' : (d === 'continence' ? 'hygiene' : (d === 'diabetes' ? 'medication' : (d === 'pain' || d === 'skin' || d === 'palliative' || d === 'catheter' ? 'medication' : 'social')))); }
 
-  // 1. Participant goals → domain goals (own words, per the Quality Standards)
-  (mac.goals || []).forEach(function (g) {
-    const text = (g.goal || '').trim(); if (!text) return;
-    let ds = ODC_MAC_MAP.textDomains((g.goal || '') + ' ' + (g.concern || '') + ' ' + (g.serviceRecs || []).join(' '), 3);
-    if (!ds.length) ds = ['social'];
-    ds.forEach(function (d) { bucket(tgt(d)).goals.push('Participant goal (' + srcTag + '): ' + text); });
-    (g.difficulties || []).forEach(function (df) {
-      if (/speaking|language|interpreter/i.test(df)) { ['hygiene', 'social'].forEach(function (d) { bucket(tgt(d)).intervention.push('Allocate ' + (mac.summary && mac.summary.language ? mac.summary.language + '-speaking' : 'language-matched') + ' support workers where possible — ' + df.replace(/^[A-Z][a-z]+ [A-Z][a-z]+ would require /, '')); }); }
-    });
-  });
-  // 2. Assessor narrative → care needs
+  // v3.4.4 (Sue, 9 Nov 2026): ONLY the red "Your assessment summary" box of the MAC Support Plan goes
+  // into the Care Plan — each sub-heading to its category as the care need. The blue / purple sections
+  // (participant goals, recommended services, approvals, budget) stay in the reference panel above and
+  // are never written into the plan. The rule engine (ODC_RULES) writes goals / interventions / aids /
+  // providers from the assessments and the budget.
   Object.keys(dom).forEach(function (k) {
     const d = ODC_MAC_MAP.NARRATIVE_DOMAIN[k]; if (!d || !dom[k]) return;
     bucket(tgt(d)).needs.push('Assessor summary (' + srcTag + ', ' + k.replace(/_/g, ' ') + '): ' + dom[k]);
   });
   if (!Object.keys(dom).length && mac.summary && mac.summary.situation) bucket(tgt('social')).needs.push('Assessor summary (' + srcTag + '): ' + mac.summary.situation);
-  // 3. Assessment ticks / scores → standard interventions (RN to tailor)
-  const LIB = [
-    ['mobility', D.ia_falls12m, 'Falls prevention: review footwear, lighting and trip hazards; encourage prescribed exercises; support worker to stand by for transfers; report any fall to the RN the same day.'],
-    ['mobility', D.frat_total && /High/i.test(D.frat_risk || ''), 'FRAT high risk (' + D.frat_total + '): refer to physiotherapy / OT for mobility and home-safety review; consider personal alarm.'],
-    ['mobility', D.ia_mobilityAid, 'Check mobility aid condition at each visit; prompt use of the aid for all walking.'],
-    ['hygiene', D.ia_hygieneAssist, 'Support worker to assist with showering / dressing as agreed, promoting independence and dignity; non-slip mat and shower chair in place.'],
-    ['continence', D.ia_incontinent, 'Continence products available; prompt toileting; skin checked and reported; refer to continence nurse if pattern changes.'],
-    ['nutrition', D.ia_weightLoss || D.ia_appetiteIssue, 'Monitor weight monthly (MNA score ' + (D.mna_score || '—') + '); encourage small frequent meals and fluids; refer to dietitian if further loss.'],
-    ['nutrition', D.ia_swallowing, 'Texture-modified diet / fluids as prescribed (IDDSI ' + (D.cp_nutrition_iddsi_meal || '—') + '); upright for meals; report coughing or choking.'],
-    ['medication', D.ia_polypharmacy || D.med_assist === 'Yes', 'Medication prompting from Webster pack / blister pack; GP medication summary on file; report missed doses.'],
-    ['medication', D.ia_anticoagulant, 'On anticoagulant: observe and report bruising or bleeding; avoid injury.'],
-    ['medication', D.ia_insulin || D.ia_diabetes, 'Diabetes: BGL monitoring as per GP plan; hypo signs known to workers; foot care checked.'],
-    ['cognition', D.ia_cognitiveImpair || D.ia_dementia, 'Consistent workers and routine; simple one-step instructions; memory aids; monitor for changes and report to RN / GP.'],
-    ['behaviour', D.ia_socialIsolation, 'Social connection: regular social support visits / group activity; check mood at visits and report low mood.'],
-    ['communication', D.p_interpreter === 'Yes' || D.ia_hearingIssue || D.ia_visionIssue || D.ia_speechIssue, 'Communication: ' + [D.p_interpreter === 'Yes' ? 'book interpreter for reviews and appointments' : '', D.ia_hearingIssue ? 'face participant, speak clearly, hearing aid checked' : '', D.ia_visionIssue ? 'good lighting, large print, keep walkways clear' : '', D.ia_speechIssue ? 'allow time, use communication aids' : ''].filter(Boolean).join('; ') + '.'],
-    ['skin', D.ia_skinIssue || D.ia_pressureInjuryRisk || D.ia_woundActive, 'Skin: check pressure areas each visit; moisturise; report redness, tears or wounds to the RN; wound care as per RN plan.'],
-    ['pain', D.ia_pain_yes || D.ia_chronicPain, 'Pain: monitor and record pain (worst ' + (D.pain_worst || '—') + ', average ' + (D.pain_avg || '—') + '); analgesia as prescribed; report uncontrolled pain to GP.'],
-    ['home', D.ia_homeSafety || D.ia_home_repairs === 'Yes', 'Home safety: smoke alarm tested; remove trip hazards; home maintenance / modifications arranged through the package.'],
-    ['social', D.ia_noTransport, 'Transport: arrange package transport / accompanied activities for appointments and shopping.'],
-    ['palliative', D.ia_palliative, 'Palliative approach: comfort-focused care; Advance Care Directive discussed; palliative service involved.']
-  ];
-  LIB.forEach(function (r) { if (r[1]) bucket(tgt(r[0])).intervention.push(r[2]); });
-  // 4. General recommendations → PEEP / home / GP
-  (mac.generalRecs || []).forEach(function (r) {
-    const t = r.recommendation + ' (responsibility: ' + r.responsibility + ')';
-    if (/emergency|evacuation/i.test(r.recommendation)) { if (!D.cp_peep_evac) { D.cp_peep_evac = draft.cp_peep_evac = srcTag + ' recommendation: ' + t; written.push('cp_peep_evac'); } }
-    else if (/GP|health professional/i.test(r.recommendation)) { if (!D.cp_prev_gp) { D.cp_prev_gp = draft.cp_prev_gp = t; written.push('cp_prev_gp'); } }
-    else bucket(tgt('home')).tasks.push(srcTag + ' recommendation: ' + t);
-  });
-  // 5. Service recommendations → tasks / providers / days (+ budget cross-check)
-  x.recs.forEach(function (r) {
-    if (r.excluded) return;
-    const b = bucket(tgt(r.domain));
-    const o = r.rec;
-    b.tasks.push('• ' + r.label + ' — recommended in ' + srcTag + (o.priority ? ', priority ' + o.priority : '') + (o.outcome ? '; ' + o.outcome : '') + (r.budgeted === false ? ' ⚠ not in current package budget' : ''));
-    if (o.provider) b.providers.push(o.provider + (o.contact ? ' · ' + o.contact : '') + ' — ' + r.label + (o.status ? ' (' + o.status + ')' : ''));
-    if (o.frequency) b.days.push(r.label + ': ' + o.frequency + ' (assessor recommendation)');
-  });
-  // 6. Budget lines → tasks / days
-  x.budget.forEach(function (bl) {
-    (bl.domains || [bl.domain]).forEach(function (d) {
-      const b = bucket(tgt(d));
-      b.tasks.push('• ' + bl.text + ' — ' + bl.freq + ' (package budget)' + (!bl.recommended && !bl.approved ? ' ⚠ not in Support Plan' : ''));
-      b.days.push(bl.text + ': ' + bl.freq);
-    });
-  });
-  // 7. Approvals → aids / tasks
-  const a = mac.approvals || {};
-  if (a.at) bucket(tgt('mobility')).aids.push('Assistive technology approved — AT ' + a.at.tier + (a.at.to ? ', funding available to ' + a.at.to : '') + (a.at.services ? ': ' + a.at.services.join(', ') : '') + '. OT / physio prescription required before purchase.');
-  if (a.hm) bucket(tgt('home')).aids.push('Home modifications approved — HM ' + a.hm.tier + (a.hm.to ? ', funding available to ' + a.hm.to : '') + '. OT assessment and quotes required.');
-  (a.groups || []).filter(function (g) { return /^SaH/.test(g.level) && g.serviceType; }).forEach(function (g) {
-    const d = tgt(ODC_MAC_MAP.serviceDomain(g.serviceType));
-    bucket(d).tasks.push('Approved under ' + g.level + ' — ' + g.serviceType + ': ' + (g.services || []).map(function (sv) { return sv.name; }).join(', '));
-  });
-  (mac.serviceRecs || []).filter(function (r) { return /goods|equipment|assistive/i.test(r.service); }).forEach(function (r) {
-    bucket(tgt(/communication/i.test(r.subType) ? 'communication' : 'mobility')).aids.push(r.service + (r.subType ? ' — ' + r.subType : '') + ' (recommended in ' + srcTag + (r.outcome ? '; ' + r.outcome : '') + ')');
-  });
   // 8. Write — fill only empty fields; remember generated text for the DRAFT tag
   function uniq(arr) { const seen = {}; return arr.filter(function (v) { if (seen[v]) return false; seen[v] = 1; return true; }); }
   Object.keys(perDom).forEach(function (d) {
@@ -6452,6 +6396,7 @@ function macGenerateDraft(D, opts) {
       const key = 'cp_' + d + '_' + map[f];
       const text = lines.join('\n');
       const cur = D[key] ? String(D[key]).trim() : '';
+      if (D.__cp_dismissed && D.__cp_dismissed[key] && !opts.force) return; // RN cleared this draft — leave it empty
       if (!cur || (opts.force && draft[key] === D[key])) { D[key] = text; draft[key] = text; written.push(key); }
       else if (draft[key] === D[key] && cur.indexOf(text) === -1) { D[key] = cur + '\n' + text; draft[key] = D[key]; written.push(key); } // engine text — add the MAC lines beneath it
     });
@@ -6474,7 +6419,7 @@ function macApplyDraftTags() {
     tag.style.cssText = 'display:inline-block;font-size:10px;font-weight:700;letter-spacing:.04em;color:#6b4e00;background:#fff8e1;border:1px solid #d4a017;border-radius:3px;padding:1px 6px;margin:4px 0 0';
     tag.textContent = 'DRAFT — RN to review';
     el.insertAdjacentElement('afterend', tag);
-    const clear = function () { if (String(el.value) !== String(draft[k] || '')) { delete draft[k]; el.style.boxShadow = ''; tag.remove(); el.removeEventListener('input', clear); } };
+    const clear = function () { if (String(el.value) !== String(draft[k] || '')) { delete draft[k]; if (!String(el.value).trim()) { (D.__cp_dismissed = D.__cp_dismissed || {})[k] = true; } el.style.boxShadow = ''; tag.remove(); el.removeEventListener('input', clear); } };
     el.addEventListener('input', clear);
   });
 }
@@ -7032,6 +6977,7 @@ window.ODC_RULES = (function () {
     const prev = draft[key];
     const isAuto = (cur === '' || cur === false) || (prev != null && cur === prev);
     if (!isAuto) return;
+    if ((cur === '' || cur === false) && D.__cp_dismissed && D.__cp_dismissed[key]) return; // v3.4.4: RN cleared this line — stays empty
     // keep an AI-drafted line that is still part of the field
     const ai = D.__ai_draft && D.__ai_draft[key];
     if (ai && typeof cur === 'string' && cur.indexOf(ai) !== -1 && val && typeof val === 'string' && val.indexOf(ai) === -1) val = /_intervention$/.test(key) ? val + '\n• ' + ai : val + '\n\n' + ai;
@@ -7470,6 +7416,7 @@ window.ODC_AI = (function () {
       const cur = D[key] == null ? '' : String(D[key]);
       const isAuto = !cur.trim() || draft[key] === cur || (D.__cp_auto && D.__cp_auto[key] === cur);
       if (!isAuto && mode !== 'append') return;
+      if (!cur.trim() && D.__cp_dismissed && D.__cp_dismissed[key]) return; // v3.4.4: RN cleared this field
       let val;
       if (mode === 'append') { if (cur.indexOf(text) !== -1) return; if (!isAuto && !/(^|\n)• /.test(cur)) return; val = (cur ? cur.replace(/\s+$/, '') + '\n' : '') + '• ' + text; }
       else if (mode === 'needs') { const prev = ai[key] && cur.indexOf(ai[key]) !== -1 ? cur.replace(ai[key], '').replace(/\n{2,}$/, '\n') : cur; const base = prev.trim(); val = base && !/^(No need identified|Funded service identified|Assessment incomplete)/.test(base) ? base + '\n\n' + text : text; }
