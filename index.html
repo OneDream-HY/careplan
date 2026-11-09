@@ -18,8 +18,17 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.4.2 (9 Nov 2026)
+     APP VERSION: v3.4.3 (9 Nov 2026)
      Version history:
+       v3.4.3 — "Hand over to RN" buttons removed from the Initial / Annual
+              Assessment: RNs do the assessments themselves, so the hand-over
+              is the "New client" notice at agreement signing. Coordinators'
+              review-due message now asks only for the visit booking and the
+              budget / MAC Support Plan import (flow package rebuilt).
+              Social Connection & Transport: new trigger (no licence + no
+              transport assistance); the 13 · Transport purposes and the
+              12 · Social "Support required" ticks are added as extra DRAFT
+              intervention lines under the unchanged standard wording.
        v3.4.2 — "Care Plan approved" also posted to the coordinators' channel
               (AgedCare Team → General). On Approve the app writes one row per
               client to the CarePlanReviews list (CarePlan site) with the 12-month
@@ -1263,7 +1272,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.4.2</span>
+    <span class="badge">Cloud · v3.4.3</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1726,7 +1735,6 @@ window.ODC_CLOUD = (function() {
         <div class="no-print" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
           <button type="button" class="btn ghost" id="btnImportOnboarding">⬇ Import from Onboarding form</button>
           <button type="button" class="btn ghost" data-legacy-import>📂 Import last year’s forms (PDF)</button>
-          <button type="button" class="btn" data-rn-handover="new" title="Posts to the RNs channel in Teams that this assessment is complete and the Care Plan can be started">📣 Hand over to RN (assessment complete)</button>
         </div>
       </div>
       <div class="step-meta"><span class="big">01</span>Step One</div>
@@ -1771,7 +1779,6 @@ window.ODC_CLOUD = (function() {
         <p>For clients <strong>after 12 months</strong> of service who are <strong>low level / non-complex</strong>. This single bundled document replaces the full re-assessment. FRAT and Comprehensive Health/Medical Ax are done <em>separately</em> if missing from the file — toggle them on under <em>Adjuncts</em>.</p>
         <div class="no-print" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:10px">
           <button type="button" class="btn ghost" data-legacy-import>📂 Import last year’s forms (PDF)</button>
-          <button type="button" class="btn" data-rn-handover="annual" title="Posts to the RNs channel in Teams that this assessment is complete and the Care Plan can be started">📣 Hand over to RN (assessment complete)</button>
         </div>
       </div>
       <div class="step-meta"><span class="big">01</span>Annual</div>
@@ -1847,7 +1854,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.4.2"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.4.3"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -6831,6 +6838,7 @@ window.ODC_RULES = (function () {
       if (yes(D.ia_socialIsolation)) r.push('socially isolated');
       if (yes(D.ia_social_geo)) r.push('geographically isolated');
       if (yes(D.ia_noTransport)) r.push('no transport');
+      if (/^no/i.test(S(D.ia_transport_license)) && /^none$/i.test(S(D.ia_transport_used).replace(/,.*$/, '')) && (D.ia_transport_used || []).length === 1) r.push('no driving licence and no transport assistance');
       if (/monthly|other/i.test(S(D.ia_social_family)) && /monthly|other/i.test(S(D.ia_social_friends))) r.push('limited family / friend contact');
       return r.length ? 'present' : '';
     }
@@ -6969,6 +6977,27 @@ window.ODC_RULES = (function () {
   };
 
   /* ---- engine ---- */
+  // v3.4.3 — client-specific lines added under the standard wording (Social Connection & Transport only for now):
+  //   13 · Transport "Requires transport for" → one line naming the purposes (RN fills [frequency]);
+  //   12 · Social "Support required" → one line per ticked support.
+  function extraIv(d, D) {
+    const out = [];
+    if (d !== 'social') return out;
+    const purposes = (D.ia_transport_for || []).filter(function (x) { return x && !/^other$/i.test(x); });
+    if (/other/i.test(S(D.ia_transport_for)) && S(D.transport_for_other)) purposes.push(S(D.transport_for_other));
+    if (purposes.length) out.push('Transport required for: ' + purposes.join(', ') + ' [frequency]' + (/support worker/i.test(S(D.ia_transport_used)) ? ' — support worker' : /community transport/i.test(S(D.ia_transport_used)) ? ' — community transport' : /taxi/i.test(S(D.ia_transport_used)) ? ' — taxi' : '') + '.');
+    const SUP = {
+      'Complete grocery shopping': 'Support worker to complete grocery shopping for [Name] [frequency].',
+      'Take consumer shopping': 'Accompany [Name] shopping [frequency].',
+      'Assistance paying bills': 'Assist [Name] with paying bills [frequency]; [Name] retains control of own finances.',
+      'Assistance with banking': 'Accompany / assist [Name] with banking [frequency]; [Name] retains control of own finances.',
+      'Social companionship by support worker': 'Social companionship visit by support worker [frequency] — conversation, shared activity, outings as preferred.',
+      'Offer information about centre-based programs': 'Provide information about centre-based / community programs (e.g. One Dream Senior Day Care) and support [Name] to attend if interested.'
+    };
+    (D.ia_social_support || []).forEach(function (k) { if (SUP[k]) out.push(SUP[k]); });
+    if (/other/i.test(S(D.ia_social_support)) && S(D.social_support_other)) out.push(S(D.social_support_other) + ' [frequency].');
+    return out;
+  }
   function fillName(t, D) {
     t = t.replace(/\[Name\]/g, name(D));
     const aid = S(D.mob_aids) && !/^none$/i.test(S(D.mob_aids)) ? S(D.mob_aids).toLowerCase() : '';
@@ -7058,7 +7087,7 @@ window.ODC_RULES = (function () {
         const w = (W[d] || {})[lv];
         if (w) {
           setDraft(D, draft, K('goals'), w.goal.map(function (t) { return fillName(t, D); }).join('\n'), written);
-          setDraft(D, draft, K('intervention'), w.iv.map(function (t) { return '• ' + fillName(t, D); }).join('\n'), written);
+          setDraft(D, draft, K('intervention'), w.iv.concat(extraIv(d, D)).map(function (t) { return '• ' + fillName(t, D); }).join('\n'), written);
           setDraft(D, draft, K('aids'), (w.aids || []).join('\n'), written);
         }
       }
@@ -7510,9 +7539,11 @@ window.ODC_AI = (function () {
    client / event (English):
      1. New client — Service Agreement signed  (checked at login from the
         agreement records; marker file careplan-rn-notified.json on the site)
-     2. Assessment complete — ready for Care Plan  (coordinator presses
-        "📣 Hand over to RN" on the Initial / Annual Assessment)
-     3. Care Plan approved vN  (from ODC_APPROVAL.approve)
+     2. Care Plan approved vN  (from ODC_APPROVAL.approve) — RNs channel and
+        the coordinators' channel
+     (v3.4.3: the "Hand over to RN" message was retired — RNs do the Initial /
+      Annual Assessments themselves; handover() is kept for records that
+      already carry __rn_handover.)
    Falls back to the Teams webhook (teamsWebhookUrl) if the channel post fails. */
 window.ODC_TEAMS = (function () {
   // (markers now live in the agreement records folder: _rn-notified/<file>.txt — see checkNewAgreements)
