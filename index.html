@@ -18,8 +18,12 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.4.5 (9 Nov 2026)
+     APP VERSION: v3.4.6 (13 Nov 2026)
      Version history:
+       v3.4.6 — Budget import stamp (Catherine, 13 Nov): "Updated dd/mm/yyyy"
+              always uses the Package Overview's own Date — the SAH layout
+              ("(SAH 4) … Prepared By … Date") is now parsed, and the
+              "— no change." line no longer falls back to today's date.
        v3.4.5 — MAC Support Plan import removed (Hayley / Sue, 9 Nov 2026):
               no "Import MAC Support Plan" button, nothing from the plan is
               written into the Care Plan, the "My Aged Care Support Plan" page
@@ -1284,7 +1288,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.4.5</span>
+    <span class="badge">Cloud · v3.4.6</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1865,7 +1869,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.4.5"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.4.6"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -5539,7 +5543,10 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
     const t = String(text).replace(/ /g, ' ');
     const b = {};
     b.client = num(/Client Name\s*\(?O?\)?\s*([A-Za-z' \-]+?)\s*\(/, t);
-    b.date = num(/\(Level \d\)[\s\S]{0,40}?(\d{1,2}\/\d{1,2}\/\d{4})/, t) || num(/Date[\s\S]{0,40}?(\d{1,2}\/\d{1,2}\/\d{4})(?!,)/, t);
+    // v3.4.6: the Package Overview's own Date (SAH layout: "Client Name (O) X (SAH 4) … Prepared By … Date dd/mm/yyyy")
+    b.date = num(/Prepared\s*By[\s\S]{0,120}?\bDate\b\s*:?\s*(\d{1,2}\/\d{1,2}\/\d{4})/i, t)
+      || num(/\((?:Level|SAH)\s*\d\)[\s\S]{0,80}?(\d{1,2}\/\d{1,2}\/\d{4})/i, t)
+      || num(/\bDate\b[\s\S]{0,120}?(\d{1,2}\/\d{1,2}\/\d{4})(?!,)/, t);
     b.level = num(/HCP LEVEL\s*(\d)/i, t);
     let m = t.match(/Total Subsidy[\s\S]{0,80}?([\d,]+\.\d{2})\s+([\d,]+\.\d{2})/i);
     if (m) { b.subsidyQ = m[1]; b.subsidyM = m[2]; }
@@ -5755,7 +5762,7 @@ document.getElementById('btnPrintCancel').addEventListener('click', closePrintPi
           const el = document.querySelector('#careplanContent [data-key="' + key + '"]');
           if (!el) { hidden.push(d); return; }
           const svKey = perDom[d].join('\n');
-          const block = lastDom[d] === svKey ? 'Updated ' + today + ' \u2014 no change.' : buildSummary(b, perDom[d]);
+          const block = lastDom[d] === svKey ? 'Updated ' + budgetStampDate(b) + ' \u2014 no change.' : buildSummary(b, perDom[d]);
           lastDom[d] = svKey;
           const curv = state.data[key] ? String(state.data[key]).trim() : '';
           state.data[key] = curv ? curv + '\n\n' + block : block;
