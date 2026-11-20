@@ -18,8 +18,20 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.4.6 (13 Nov 2026)
+     APP VERSION: v3.5 (20 Nov 2026)
      Version history:
+       v3.5   — (Hayley, 20 Nov) Interim Care Plan retired (ODC_FEATURES.interimCP
+              = false; button, prefill and print entry hidden, data untouched).
+              Ongoing records added (ODC_LOG): Catheter form gains the
+              "Catheterization change chart" (one entry per change); Wound form
+              gains the "Dressing change record" (one entry per dressing change,
+              all columns of the ODC form p.3) and "Wound photos" (weekly photo
+              upload: resized JPEG saved to the CarePlan site drive under
+              wound-photos/<clientId>/, thumbnail kept on the record and printed).
+       v3.4.7 — Security (developer review, 19 Nov): the Teams Workflows webhook
+              URL was removed from this public file and the workflow deleted;
+              all Teams notices use Graph ChannelMessage.Send (signed-in user)
+              or Power Automate flows. teamsWebhookUrl stays empty.
        v3.4.6 — Budget import stamp (Catherine, 13 Nov): "Updated dd/mm/yyyy"
               always uses the Package Overview's own Date — the SAH layout
               ("(SAH 4) … Prepared By … Date") is now parsed, and the
@@ -202,7 +214,7 @@
     // Teams "annual review due" notifications — paste a Teams Workflows webhook
     // URL here (Teams channel → ⋯ → Workflows → "Post to a channel when a webhook
     // request is received" → copy the HTTP URL). Leave '' to disable.
-    teamsWebhookUrl: 'https://default857e6685dad141acb637b3fa089eee.a8.environment.api.powerplatform.com:443/powerautomate/automations/direct/cu/19/workflows/b7f85329bd7146fa8933f4081e658aaa/triggers/manual/paths/invoke?api-version=1&sp=%2Ftriggers%2Fmanual%2Frun&sv=1.0&sig=dWU-kewvzFbBhpzCqNPj3MlkXrZjbWCgPrZQTFVLCRk',
+    teamsWebhookUrl: '',   // v3.4.7: webhook removed — Teams posts go through Graph (signed-in user) and Power Automate; never put a webhook URL in this public file
     // Where finished PDFs are filed: the document library that holds one folder
     // per client. driveId is that library's Graph drive id (fastest); if it is
     // blank or stops working, the library is looked up from sitePath + libraryName.
@@ -1238,6 +1250,25 @@ window.ODC_CLOUD = (function() {
     .cp-row { grid-template-columns: 1fr; }
     .mode-grid { grid-template-columns: 1fr; }
   }
+  /* v3.5 — ongoing record tables (catheter change chart, wound dressing record, wound photos) */
+  .odc-log { margin-top: 8px; }
+  .odc-log .log-entry { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; background: #fff; page-break-inside: avoid; }
+  .odc-log .log-head { display: flex; align-items: center; gap: 8px; font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--ink-soft); margin-bottom: 6px; }
+  .odc-log .log-head .spacer { flex: 1; }
+  .odc-log .log-grid { display: grid; grid-template-columns: repeat(var(--cols, 4), minmax(0, 1fr)); gap: 6px 10px; }
+  .odc-log .log-grid label.field > span { font-size: 10.5px; }
+  .odc-log .log-grid .span2 { grid-column: span 2; }
+  .odc-log .log-grid input, .odc-log .log-grid select, .odc-log .log-grid textarea { width: 100%; font-size: 12.5px; }
+  .odc-log .log-empty { font-size: 12.5px; color: var(--ink-muted); font-style: italic; padding: 4px 0 8px; }
+  .odc-photos { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 10px; margin-top: 8px; }
+  .odc-photos .ph { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; background: #fff; page-break-inside: avoid; }
+  .odc-photos .ph img { display: block; width: 100%; height: 150px; object-fit: cover; background: #f3f3ee; }
+  .odc-photos .ph .ph-meta { padding: 5px 8px; font-size: 11.5px; color: var(--ink); display: flex; align-items: center; gap: 6px; }
+  .odc-photos .ph .ph-meta input[type=date] { font-size: 11.5px; flex: 1; min-width: 0; }
+  .odc-photos .ph .ph-meta .mini-btn { padding: 1px 6px; font-size: 10px; }
+  .odc-photos .ph .ph-note { padding: 0 8px 6px; font-size: 11px; color: var(--ink-soft); }
+  .odc-photos .ph.pending { outline: 2px dashed #d4a017; }
+  @media print { .odc-log .log-grid input, .odc-log .log-grid select { border: 0; border-bottom: 1px solid #ccc; } .odc-photos { grid-template-columns: repeat(2, 1fr); } .odc-photos .ph img { height: 210px; object-fit: contain; } }
 </style>
 </head>
 <body>
@@ -1288,7 +1319,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.4.6</span>
+    <span class="badge">Cloud · v3.5</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1869,13 +1900,17 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.4.6"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.5"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
 const AUTO_TRIGGERS = {"ia_pain_yes": ["pain"], "ia_chronicPain": ["pain"], "ia_skinIssue": ["skin"], "ia_pressureInjuryRisk": ["skin"], "ia_woundActive": ["wound", "skin"], "ia_skinTear": ["skin", "wound"], "ia_incontinent": ["continence"], "ia_catheter": ["catheter", "continence"], "ia_weightLoss": ["mna", "nutrition"], "ia_swallowing": ["nutrition", "communication"], "ia_pegFeeding": ["nutrition"], "ia_appetiteIssue": ["mna"], "ia_diabetes": ["diabetes"], "ia_falls12m": ["frat", "mobility"], "ia_mobilityAid": ["mobility"], "ia_balanceIssue": ["frat", "mobility"], "ia_behaviour": ["behaviour"], "ia_dementia": ["behaviour", "communication"], "ia_psychotropic": ["behaviour", "medications"], "ia_polypharmacy": ["medications"], "ia_anticoagulant": ["medications"], "ia_insulin": ["medications", "diabetes"], "ia_hygieneAssist": ["hygiene"], "ia_palliative": ["palliative"], "ia_complexNeed": ["comprehensive"], "ia_visionIssue": ["communication"], "ia_legallyBlind": ["communication"], "ia_hearingIssue": ["communication"], "ia_speechIssue": ["communication"], "ia_cognitiveImpair": ["communication", "behaviour"]};
 
 /* state */
+/* v3.5 (Hayley, 20 Nov 2026): the Interim Care Plan step is retired — it was a paper step
+   with no clinical use once the Care Plan is generated from the assessments. Code kept
+   dormant behind this flag; existing icp_* data stays in the records untouched. */
+const ODC_FEATURES = { interimCP: false };
 let state = {
   mode: null,                 // 'new' | 'annual'
   currentStep: null,          // 'initial' | 'additional' | 'annual' | 'careplan'
@@ -2704,6 +2739,108 @@ function buildAnnualAssessment() {
 }
 
 /* ---------- ADDITIONAL ASSESSMENT BUILDERS ---------- */
+
+/* ---------- v3.5: ongoing records (ODC_LOG) ----------
+   Repeating entries stored as an array on the record (state.data[key] = [{...}, ...]) with a
+   simple add / remove UI, bound without re-rendering on each keystroke. Used by:
+     - Catheter: cat_changes   (Catheterization Change Chart — one entry per change)
+     - Wound:    wound_changes (Dressing change record — one entry per dressing change)
+     - Wound:    wound_photos  (weekly wound photos; file uploaded to the CarePlan site drive
+                               under wound-photos/<clientId>/, thumbnail kept on the record) */
+const ODC_LOG = (function () {
+  const SPECS = {};
+  function esc(v) { return String(v == null ? '' : v).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
+  function today() { const d = new Date(); return d.getFullYear() + '-' + ('0' + (d.getMonth() + 1)).slice(-2) + '-' + ('0' + d.getDate()).slice(-2); }
+  function dmy(iso) { const m = String(iso || '').match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? m[3] + '/' + m[2] + '/' + m[1] : (iso || ''); }
+  function staffName() { try { const a = window.ODC_CLOUD && ODC_CLOUD.getUser && ODC_CLOUD.getUser(); return (a && (a.name || a.email)) || ''; } catch (e) { return ''; } }
+
+  /* --- entry tables --- */
+  function table(key, title, cols, opts) {
+    opts = opts || {}; SPECS[key] = { title: title, cols: cols, opts: opts };
+    return '<div class="odc-log" data-logkey="' + key + '" style="--cols:' + (opts.cols || 4) + '"></div>';
+  }
+  function field(c, v, key, i) {
+    const a = ' data-logfield="' + c.k + '" data-logkey="' + key + '" data-logidx="' + i + '"';
+    const span = c.span ? ' class="span' + c.span + '"' : '';
+    let inp;
+    if (c.t === 'select') inp = '<select' + a + '><option value=""></option>' + (c.o || []).map(function (o) { return '<option' + (o === v ? ' selected' : '') + '>' + esc(o) + '</option>'; }).join('') + '</select>';
+    else if (c.t === 'textarea') inp = '<textarea rows="2"' + a + '>' + esc(v) + '</textarea>';
+    else inp = '<input type="' + (c.t || 'text') + '" value="' + esc(v) + '"' + a + '/>';
+    return '<label class="field"' + span + '><span>' + esc(c.l) + '</span>' + inp + '</label>';
+  }
+  function render(root) {
+    const key = root.dataset.logkey, spec = SPECS[key]; if (!spec) return;
+    const D = state.data; if (!Array.isArray(D[key])) D[key] = [];
+    const rows = D[key];
+    root.innerHTML =
+      (rows.length ? rows.map(function (r, i) {
+        return '<div class="log-entry"><div class="log-head"><span>' + esc(spec.title) + ' #' + (i + 1) + (r.date ? ' — ' + esc(dmy(r.date)) : '') + '</span><span class="spacer"></span>' +
+          '<button type="button" class="mini-btn no-print" data-logrm="' + i + '">Remove</button></div>' +
+          '<div class="log-grid">' + spec.cols.map(function (c) { return field(c, r[c.k], key, i); }).join('') + '</div></div>';
+      }).join('') : '<div class="log-empty">' + esc(spec.opts.empty || 'No entries yet.') + '</div>') +
+      '<button type="button" class="mini-btn no-print" data-logadd="1">+ ' + esc(spec.opts.addLabel || ('Add ' + spec.title.toLowerCase())) + '</button>';
+    root.querySelectorAll('[data-logfield]').forEach(function (el) {
+      const h = function () { const i = +el.dataset.logidx; rows[i] = rows[i] || {}; rows[i][el.dataset.logfield] = el.value; autoSave(); };
+      el.addEventListener('input', h); el.addEventListener('change', h);
+    });
+    root.querySelectorAll('[data-logrm]').forEach(function (b) { b.addEventListener('click', function () { if (!confirm('Remove this entry?')) return; rows.splice(+b.dataset.logrm, 1); render(root); autoSave(); }); });
+    const add = root.querySelector('[data-logadd]');
+    if (add) add.addEventListener('click', function () { const n = { date: today() }; if (spec.opts.staffField) n[spec.opts.staffField] = staffName(); rows.push(n); render(root); autoSave(); const last = root.querySelectorAll('.log-entry'); if (last.length) { const f = last[last.length - 1].querySelector('input,select,textarea'); if (f) f.focus(); } });
+  }
+
+  /* --- photos --- */
+  function photos(key, note) { SPECS[key] = { photos: true, note: note }; return '<div class="odc-log" data-photokey="' + key + '"></div>'; }
+  function loadImage(file) { return new Promise(function (res, rej) { const u = URL.createObjectURL(file); const im = new Image(); im.onload = function () { URL.revokeObjectURL(u); res(im); }; im.onerror = rej; im.src = u; }); }
+  function scale(im, max, q) { const r = Math.min(1, max / Math.max(im.width, im.height)); const c = document.createElement('canvas'); c.width = Math.round(im.width * r); c.height = Math.round(im.height * r); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height); return c.toDataURL('image/jpeg', q); }
+  function dataToBlob(d) { const b = atob(d.split(',')[1]); const a = new Uint8Array(b.length); for (let i = 0; i < b.length; i++) a[i] = b.charCodeAt(i); return new Blob([a], { type: 'image/jpeg' }); }
+  async function upload(key, file, root) {
+    const D = state.data; if (!Array.isArray(D[key])) D[key] = [];
+    const im = await loadImage(file);
+    const full = scale(im, 1600, 0.82), thumb = scale(im, 420, 0.7);
+    const stamp = new Date(); const name = stamp.toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.jpg';
+    const row = { date: today(), name: name, thumb: thumb, by: staffName(), note: '' };
+    D[key].push(row); renderPhotos(root); autoSave();
+    try {
+      if (!window.ODC_CLOUD || !ODC_CLOUD.graph || !ODC_CLOUD.siteId) throw new Error('not signed in');
+      const cid = (typeof activeClientId !== 'undefined' && activeClientId) || 'unknown';
+      const path = '/sites/' + ODC_CLOUD.siteId + '/drive/root:/wound-photos/' + encodeURIComponent(cid) + '/' + name + ':/content';
+      const item = await ODC_CLOUD.graph(path, { method: 'PUT', body: dataToBlob(full), headers: { 'Content-Type': 'image/jpeg' } });
+      row.itemId = item && item.id; row.webUrl = item && item.webUrl; delete row.pending;
+    } catch (e) { row.pending = true; console.warn('wound photo upload failed', e); alert('The photo was kept on this record, but the full-size file could not be uploaded to SharePoint (' + (e.message || e) + '). It will show as "upload pending" — try again later with "Retry upload".'); }
+    renderPhotos(root); autoSave();
+  }
+  async function retry(key, i, root) {
+    const r = state.data[key][i]; if (!r || !r.thumb) return;
+    try { const cid = (typeof activeClientId !== 'undefined' && activeClientId) || 'unknown'; const item = await ODC_CLOUD.graph('/sites/' + ODC_CLOUD.siteId + '/drive/root:/wound-photos/' + encodeURIComponent(cid) + '/' + r.name + ':/content', { method: 'PUT', body: dataToBlob(r.thumb), headers: { 'Content-Type': 'image/jpeg' } }); r.itemId = item.id; r.webUrl = item.webUrl; delete r.pending; r.note = (r.note ? r.note + ' ' : '') + '(thumbnail only — original was not uploaded)'; }
+    catch (e) { alert('Upload failed again: ' + (e.message || e)); }
+    renderPhotos(root); autoSave();
+  }
+  function renderPhotos(root) {
+    const key = root.dataset.photokey, spec = SPECS[key]; const D = state.data; if (!Array.isArray(D[key])) D[key] = [];
+    const rows = D[key];
+    root.innerHTML = (spec.note ? '<p class="subtitle" style="margin:0 0 4px">' + esc(spec.note) + '</p>' : '') +
+      (rows.length ? '<div class="odc-photos">' + rows.map(function (r, i) {
+        return '<div class="ph' + (r.pending ? ' pending' : '') + '">' +
+          (r.webUrl ? '<a href="' + esc(r.webUrl) + '" target="_blank" rel="noopener" title="Open full-size photo in SharePoint">' : '') + '<img src="' + (r.thumb || '') + '" alt="Wound photo ' + (i + 1) + '"/>' + (r.webUrl ? '</a>' : '') +
+          '<div class="ph-meta"><input type="date" value="' + esc(r.date || '') + '" data-phfield="date" data-phidx="' + i + '"/><button type="button" class="mini-btn no-print" data-phrm="' + i + '">✕</button></div>' +
+          '<div class="ph-note"><input type="text" placeholder="Note (optional)" value="' + esc(r.note || '') + '" data-phfield="note" data-phidx="' + i + '" style="width:100%;font-size:11px"/>' +
+          (r.pending ? '<div class="no-print" style="color:#8a4b00;margin-top:3px">Upload pending — <a href="#" data-phretry="' + i + '">Retry upload</a></div>' : '') + (r.by ? '<div style="margin-top:2px">' + esc(r.by) + '</div>' : '') + '</div></div>';
+      }).join('') + '</div>' : '<div class="log-empty">No photos yet.</div>') +
+      '<div class="no-print" style="margin-top:8px"><label class="mini-btn" style="cursor:pointer">📷 Add wound photo<input type="file" accept="image/*" capture="environment" style="display:none" data-phadd="1"/></label> <span style="font-size:11px;color:var(--ink-muted)">Photos are resized and saved to the CarePlan SharePoint site (wound-photos); a thumbnail stays on this record and prints with the form.</span></div>';
+    root.querySelectorAll('[data-phfield]').forEach(function (el) { const h = function () { rows[+el.dataset.phidx][el.dataset.phfield] = el.value; autoSave(); }; el.addEventListener('input', h); el.addEventListener('change', h); });
+    root.querySelectorAll('[data-phrm]').forEach(function (b) { b.addEventListener('click', function () { if (!confirm('Remove this photo from the record? (The file in SharePoint is kept.)')) return; rows.splice(+b.dataset.phrm, 1); renderPhotos(root); autoSave(); }); });
+    root.querySelectorAll('[data-phretry]').forEach(function (a) { a.addEventListener('click', function (e) { e.preventDefault(); retry(key, +a.dataset.phretry, root); }); });
+    const inp = root.querySelector('[data-phadd]');
+    if (inp) inp.addEventListener('change', function () { const f = inp.files && inp.files[0]; if (f) upload(key, f, root).catch(function (e) { alert('Could not read the photo: ' + (e.message || e)); }); inp.value = ''; });
+  }
+
+  function bindAll(scope) {
+    (scope || document).querySelectorAll('.odc-log[data-logkey]').forEach(render);
+    (scope || document).querySelectorAll('.odc-log[data-photokey]').forEach(renderPhotos);
+  }
+  return { table: table, photos: photos, bindAll: bindAll, render: render };
+})();
+
 const ASSESSMENTS = {
   pain: () => `
     <div class="grid two">
@@ -2761,7 +2898,16 @@ const ASSESSMENTS = {
       ${txt('wound_secondary','Secondary dressing')}
       ${txt('wound_pain_mgmt','Pain management review')}
     </div>
-    <div style="margin-top:8px">${ta('wound_progress','Progress notes — size (L/W/D mm), bed, exudate, edges, swab, photo, regime change, referrals',{rows:3})}</div>
+    <div style="margin-top:8px">${ta('wound_progress','Progress notes',{rows:2})}</div>
+    <h3 style="margin-top:14px">Dressing change record <span class="subtitle" style="font-weight:normal">(one entry per dressing change — ODC form p.3)</span></h3>
+    ${ODC_LOG.table('wound_changes','Dressing change',[
+      {k:'date',l:'Date of dressing change',t:'date'},{k:'pain',l:'Pain scale (validated tool)'},{k:'size',l:'Wound size L/W/D (mm)'},{k:'bed',l:'Wound bed (necrotic / sloughy / granulating / epithelialising)'},
+      {k:'exudate',l:'Exudate level / type (signs of infection, swab)'},{k:'edges',l:'Wound edges / surrounding skin (maceration, dry scaling, erythema, red)'},{k:'swab',l:'Wound swab taken',t:'select',o:['Yes','No','Not required']},{k:'photo',l:'Wound photo uploaded',t:'select',o:['Yes','No']},
+      {k:'cleansing',l:'Cleansing liquid'},{k:'dressing',l:'Primary & secondary dressing'},{k:'regime',l:'Dressing regime changed (reason in file notes)',t:'select',o:['No','Yes']},{k:'referral',l:'Referrals (GP, wound clinic, vascular specialist …)'},
+      {k:'staff',l:'Staff name & designation',span:2},{k:'comment',l:'Comment',span:2}
+    ],{cols:4, staffField:'staff', addLabel:'Add dressing change', empty:'No dressing changes recorded yet.'})}
+    <h3 style="margin-top:14px">Wound photos <span class="subtitle" style="font-weight:normal">(weekly and when necessary — ODC form p.4)</span></h3>
+    ${ODC_LOG.photos('wound_photos','Please upload wound photos weekly and when necessary. Take the photo with a ruler / measuring tape in view where possible.')}
     ${signoff('wound')}
   `,
   continence: () => `
@@ -2885,6 +3031,11 @@ const ASSESSMENTS = {
       ${txt('cat_freq','Frequency of changes')}
       ${txt('cat_next','Next due to change',{type:'date'})}
     </div>
+    <h3 style="margin-top:14px">Catheterization change chart <span class="subtitle" style="font-weight:normal">(one entry per change — ODC form p.3)</span></h3>
+    ${ODC_LOG.table('cat_changes','Catheter change',[
+      {k:'date',l:'Date of insertion',t:'date'},{k:'type',l:'Type',t:'select',o:['Urethral','Suprapubic','External (condom/uridome)','Other']},{k:'size',l:'Size of catheter'},{k:'balloon',l:'Amount of fluid in balloon (ml)'},
+      {k:'next',l:'Next due to change',t:'date'},{k:'stock',l:'Stock available',t:'select',o:['Yes','No','Ordered']},{k:'rn',l:'RN name'},{k:'comment',l:'Comment'}
+    ],{cols:4, staffField:'rn', addLabel:'Add catheter change', empty:'No catheter changes recorded yet.'})}
     ${signoff('catheter')}
   `,
   frat: () => `
@@ -3231,6 +3382,7 @@ function renderAxBlocks() {
   }).join('');
   // bind controls
   bindFields(wrap);
+  try { ODC_LOG.bindAll(wrap); } catch (e) { console.warn('ODC_LOG', e); }
   refreshAxClientStrips();
   document.querySelectorAll('[data-collapse]').forEach(b => {
     b.addEventListener('click', e => {
@@ -4886,6 +5038,7 @@ function _firstFilled() {
 }
 
 function prefillInterimFromInitial() {
+  if (!ODC_FEATURES.interimCP) return;
   // Auto-builds the Interim Care Plan from the Initial Assessment so nothing is
   // typed twice. LIVE rule: each icp_ field keeps auto-updating from the Initial
   // Ax until a staff member edits it by hand (tracked via __icp_auto) — after
@@ -5092,6 +5245,7 @@ function autoBuildInterim(changedKey) {
 function renderInterimForPrint() {
   const root = document.getElementById('interimPrintContent');
   if (!root) return false;
+  if (!ODC_FEATURES.interimCP) { root.innerHTML = ''; return false; }
   if (state.mode === 'new') { try { prefillInterimFromInitial(); } catch (e) {} }
   if (!interimHasData()) {
     root.innerHTML = '<p style="color:var(--ink-muted);font-style:italic">Interim Care Plan has not been filled in for this client.</p>';
@@ -5197,7 +5351,7 @@ function buildPrintItems() {
     items.push({ key:'cp_'+id, group:'Care Plan', label, meta:'', target:el });
   });
   // Interim Care Plan — populate and include if any data
-  if (renderInterimForPrint()) {
+  if (ODC_FEATURES.interimCP && renderInterimForPrint()) {
     items.push({
       key:'interim_cp',
       group:'Interim Care Plan',
@@ -5303,6 +5457,7 @@ function _initInterimEditor() {
 function updateInterimButton() {
   const btn = document.getElementById('btnInterim');
   if (!btn) return;
+  if (!ODC_FEATURES.interimCP) { btn.style.display = 'none'; return; }
   // Show in both New Client and Annual Review modes
   if (state.mode === 'new' || state.mode === 'annual') {
     btn.style.display = '';
