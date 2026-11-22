@@ -18,8 +18,14 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.5 (20 Nov 2026)
+     APP VERSION: v3.5.1 (23 Nov 2026)
      Version history:
+       v3.5.1 — (developer review, 23 Nov) Care Plan "Needs" for the 9 Interim-
+              mapped domains are now composed straight from the Initial
+              Assessment (prefillInterimFromInitial into a scratch object) —
+              no blank Needs for new clients now that the Interim step is gone.
+              Catheter: top fields = current catheter; the newest change-chart
+              entry updates Type / Size & balloon / Next due automatically.
        v3.5   — (Hayley, 20 Nov) Interim Care Plan retired (ODC_FEATURES.interimCP
               = false; button, prefill and print entry hidden, data untouched).
               Ongoing records added (ODC_LOG): Catheter form gains the
@@ -1319,7 +1325,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.5</span>
+    <span class="badge">Cloud · v3.5.1</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1900,7 +1906,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.5"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.5.1"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -2747,6 +2753,17 @@ function buildAnnualAssessment() {
      - Wound:    wound_changes (Dressing change record — one entry per dressing change)
      - Wound:    wound_photos  (weekly wound photos; file uploaded to the CarePlan site drive
                                under wound-photos/<clientId>/, thumbnail kept on the record) */
+/* v3.5.1 — newest catheter change → "current catheter" fields at the top of the Catheter form */
+function syncCatheterCurrent(rows) {
+  const D = state.data; if (!D || !Array.isArray(rows) || !rows.length) return;
+  const latest = rows.slice().sort(function (a, b) { return String(b.date || '').localeCompare(String(a.date || '')); })[0];
+  const map = { cat_type: latest.type, cat_size: [latest.size, latest.balloon ? latest.balloon + ' ml balloon' : ''].filter(Boolean).join(' — '), cat_next: latest.next };
+  Object.keys(map).forEach(function (k) {
+    if (map[k] == null || map[k] === '') return;
+    D[k] = map[k];
+    document.querySelectorAll('[data-key="' + k + '"]').forEach(function (el) { if (el.tagName === 'SELECT') { const o = Array.prototype.find.call(el.options, function (x) { return x.value === map[k] || x.text === map[k]; }); if (o) el.value = o.value; } else el.value = map[k]; });
+  });
+}
 const ODC_LOG = (function () {
   const SPECS = {};
   function esc(v) { return String(v == null ? '' : v).replace(/[&<>"]/g, function (c) { return ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c]; }); }
@@ -2780,10 +2797,10 @@ const ODC_LOG = (function () {
       }).join('') : '<div class="log-empty">' + esc(spec.opts.empty || 'No entries yet.') + '</div>') +
       '<button type="button" class="mini-btn no-print" data-logadd="1">+ ' + esc(spec.opts.addLabel || ('Add ' + spec.title.toLowerCase())) + '</button>';
     root.querySelectorAll('[data-logfield]').forEach(function (el) {
-      const h = function () { const i = +el.dataset.logidx; rows[i] = rows[i] || {}; rows[i][el.dataset.logfield] = el.value; autoSave(); };
+      const h = function () { const i = +el.dataset.logidx; rows[i] = rows[i] || {}; rows[i][el.dataset.logfield] = el.value; if (spec.opts.onChange) spec.opts.onChange(rows); autoSave(); };
       el.addEventListener('input', h); el.addEventListener('change', h);
     });
-    root.querySelectorAll('[data-logrm]').forEach(function (b) { b.addEventListener('click', function () { if (!confirm('Remove this entry?')) return; rows.splice(+b.dataset.logrm, 1); render(root); autoSave(); }); });
+    root.querySelectorAll('[data-logrm]').forEach(function (b) { b.addEventListener('click', function () { if (!confirm('Remove this entry?')) return; rows.splice(+b.dataset.logrm, 1); if (spec.opts.onChange) spec.opts.onChange(rows); render(root); autoSave(); }); });
     const add = root.querySelector('[data-logadd]');
     if (add) add.addEventListener('click', function () { const n = { date: today() }; if (spec.opts.staffField) n[spec.opts.staffField] = staffName(); rows.push(n); render(root); autoSave(); const last = root.querySelectorAll('.log-entry'); if (last.length) { const f = last[last.length - 1].querySelector('input,select,textarea'); if (f) f.focus(); } });
   }
@@ -3032,10 +3049,11 @@ const ASSESSMENTS = {
       ${txt('cat_next','Next due to change',{type:'date'})}
     </div>
     <h3 style="margin-top:14px">Catheterization change chart <span class="subtitle" style="font-weight:normal">(one entry per change — ODC form p.3)</span></h3>
+    <p class="subtitle" style="margin:6px 0 0">The fields above show the <b>current</b> catheter. Each change is recorded below; saving a new entry updates the current catheter details automatically.</p>
     ${ODC_LOG.table('cat_changes','Catheter change',[
       {k:'date',l:'Date of insertion',t:'date'},{k:'type',l:'Type',t:'select',o:['Urethral','Suprapubic','External (condom/uridome)','Other']},{k:'size',l:'Size of catheter'},{k:'balloon',l:'Amount of fluid in balloon (ml)'},
       {k:'next',l:'Next due to change',t:'date'},{k:'stock',l:'Stock available',t:'select',o:['Yes','No','Ordered']},{k:'rn',l:'RN name'},{k:'comment',l:'Comment'}
-    ],{cols:4, staffField:'rn', addLabel:'Add catheter change', empty:'No catheter changes recorded yet.'})}
+    ],{cols:4, staffField:'rn', addLabel:'Add catheter change', empty:'No catheter changes recorded yet.', onChange:function(rows){ syncCatheterCurrent(rows); }})}
     ${signoff('catheter')}
   `,
   frat: () => `
@@ -5037,18 +5055,23 @@ function _firstFilled() {
   return out.join('\n');
 }
 
-function prefillInterimFromInitial() {
-  if (!ODC_FEATURES.interimCP) return;
+function prefillInterimFromInitial(scratch) {
   // Auto-builds the Interim Care Plan from the Initial Assessment so nothing is
   // typed twice. LIVE rule: each icp_ field keeps auto-updating from the Initial
   // Ax until a staff member edits it by hand (tracked via __icp_auto) — after
   // that, their wording is left alone. To intentionally leave a field blank,
   // type "N/A" or a dash.
+  // v3.5.1: with the Interim Care Plan retired (ODC_FEATURES.interimCP = false) this
+  // composition still runs, but into a scratch object instead of the record, so the
+  // Care Plan "Needs" fields keep being filled straight from the Initial Assessment.
+  if (!ODC_FEATURES.interimCP && !scratch) return;
   const D = state.data;
-  const auto = D.__icp_auto = D.__icp_auto || {};
+  const T = scratch || D;                         // where icp_* values are written
+  const auto = scratch ? {} : (D.__icp_auto = D.__icp_auto || {});
   function V(k) {
     const v = D[k];
-    if (v == null) return '';
+    if (v == null || v === false) return '';
+    if (v === true) return 'Yes';
     if (Array.isArray(v)) return v.join(', ');
     return String(v).trim();
   }
@@ -5061,8 +5084,8 @@ function prefillInterimFromInitial() {
   }
   function setAuto(key, val) {
     if (!val) return;
-    const cur = D[key] == null ? '' : String(D[key]);
-    if (!cur.trim() || cur === auto[key]) { D[key] = val; auto[key] = val; }
+    const cur = T[key] == null ? '' : String(T[key]);
+    if (!cur.trim() || cur === auto[key]) { T[key] = val; auto[key] = val; }
   }
   setAuto('icp_clientName', V('p_name'));
   setAuto('icp_dob',        V('p_dob'));
@@ -5201,10 +5224,13 @@ function prefillCarePlanFromInitial() {
     if (cur !== val) { D[key] = val; }
     auto[key] = val;
   }
-  // 1:1 domains — take the Interim CP wording (already auto-built from the Initial Ax, or RN-edited)
+  // 1:1 domains — Interim CP wording when it exists (old records, RN-edited), otherwise composed live
+  // from the Initial Assessment (v3.5.1 — the Interim step itself is retired)
+  const icp = {}; try { prefillInterimFromInitial(icp); } catch (e) { console.warn('icp compose', e); }
+  function VI(k) { const own = V(k); if (own) return own; const v = icp[k]; return v == null ? '' : String(v).trim(); }
   Object.keys(CP_AUTO_MAP).forEach(function (dom) {
     const txt = CP_AUTO_MAP[dom].map(function (k) {
-      const v = V(k); if (!v) return '';
+      const v = VI(k); if (!v) return '';
       const l = CP_AUTO_LABELS[k]; return l ? l + ': ' + v : v;
     }).filter(Boolean).join('\n');
     setAuto('cp_' + dom + '_needs', txt);
