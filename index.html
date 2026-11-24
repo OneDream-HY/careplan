@@ -18,8 +18,16 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.5.1 (23 Nov 2026)
+     APP VERSION: v3.5.2 (24 Nov 2026)
      Version history:
+       v3.5.2 — Save safety (QA report, 24 Nov): expired sign-in now re-
+              authenticates in a POPUP (page and unsaved work stay) instead of
+              a redirect; red "NOT SAVED" banner pulses, beeps, shows minutes
+              unsaved and "Sign in again" / "Retry now" buttons, plus one
+              blocking alert per failure; leaving the page is blocked while a
+              save is pending; "Save & switch client" now waits for the save
+              and refuses to drop unsaved work (it used to clear the record
+              before the debounced save ran).
        v3.5.1 — (developer review, 23 Nov) Care Plan "Needs" for the 9 Interim-
               mapped domains are now composed straight from the Initial
               Assessment (prefillInterimFromInitial into a scratch object) —
@@ -327,10 +335,14 @@ window.ODC_CLOUD = (function() {
       const r = await _msalApp.acquireTokenSilent({ account: _account, scopes: cfg.scopes });
       return r.accessToken;
     } catch (err) {
-      console.warn('Silent token failed, falling back to redirect:', err);
-      // The redirect NAVIGATES AWAY from the page, wiping any unsaved in-memory
-      // work. Snapshot the current client to this device first so nothing is lost
-      // (restored via the shadow-backup prompt on the next load).
+      console.warn('Silent token failed:', err);
+      // v3.5.2: try a POPUP first — it keeps the page (and any unsaved work) alive.
+      // Browsers block popups that are not started by a click (e.g. the 10-second
+      // autosave), in which case we flag "sign-in needed" so the red banner can offer
+      // a "Sign in again" button that opens the popup from a real click.
+      try { const r2 = await _msalApp.acquireTokenPopup({ account: _account, scopes: cfg.scopes }); window.__odcAuthRequired = false; return r2.accessToken; }
+      catch (e2) { console.warn('Popup token failed:', e2); window.__odcAuthRequired = true; throw new Error('AUTH_REQUIRED: your Microsoft sign-in has expired — click "Sign in again" on the red banner.'); }
+      // (previous behaviour, kept for reference — never reached)
       try { if (typeof window.__odcShadowSave === 'function') window.__odcShadowSave(); } catch (e) {}
       await _msalApp.acquireTokenRedirect({ scopes: cfg.scopes });
       // Page redirects — control returns via handleRedirectPromise. Token will be available on the next attempt.
@@ -1325,7 +1337,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.5.1</span>
+    <span class="badge">Cloud · v3.5.2</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1906,7 +1918,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.5.1"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.5.2"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -8625,15 +8637,19 @@ document.getElementById('btnClear').addEventListener('click', () => {
   if (s) { s.textContent = 'Cleared ' + new Date().toLocaleTimeString(); s.classList.add('saved'); }
 });
 
-document.getElementById('btnSwitch').addEventListener('click', () => {
-  // Save-and-switch: ensure latest data is persisted, then return to picker.
-  autoSave();
-  setTimeout(() => {
-    // Reset in-memory state but keep the saved slot intact in localStorage.
-    state = {mode:null,currentStep:null,data:{},selectedTools:{},manualTools:{},carePlan:{}};
-    activeClientId = null;
-    showModePicker();
-  }, 450);
+document.getElementById('btnSwitch').addEventListener('click', async () => {
+  // v3.5.2: save FIRST and wait for the result. (Before, the in-memory record was
+  // cleared 450 ms after the click while the debounced save ran 1.5 s later on the
+  // already-empty record — the last edits, or anything unsaved after a failed save,
+  // were silently lost.)
+  const btn = document.getElementById('btnSwitch'); const old = btn.textContent; btn.disabled = true; btn.textContent = 'Saving…';
+  let ok = true;
+  try { ok = (typeof window.odcFlushSave === 'function') ? await window.odcFlushSave() : (autoSave(), true); } catch (e) { ok = false; }
+  btn.disabled = false; btn.textContent = old;
+  if (!ok && !confirm('⚠ The latest changes could NOT be saved to SharePoint (see the red banner).\n\nLeave this client anyway? Unsaved changes stay on this device and will be offered for restore next time, but they are NOT in SharePoint yet.\n\nOK = leave anyway   ·   Cancel = stay and retry')) return;
+  state = {mode:null,currentStep:null,data:{},selectedTools:{},manualTools:{},carePlan:{}};
+  activeClientId = null;
+  showModePicker();
 });
 
 /* ---------- INIT ---------- */
@@ -8743,25 +8759,47 @@ if (_activeId && loadClient(_activeId) && state.mode) {
 
     // Big red banner for failed saves — a tiny status label is too easy to miss
     // when the failure means client data is not reaching SharePoint.
-    function saveFailBanner(show) {
+    function beep() {
+      try { const ac = new (window.AudioContext || window.webkitAudioContext)(); const o = ac.createOscillator(), g = ac.createGain(); o.type = 'square'; o.frequency.value = 880; g.gain.value = 0.08; o.connect(g); g.connect(ac.destination); o.start(); setTimeout(function () { o.frequency.value = 660; }, 180); setTimeout(function () { o.stop(); ac.close(); }, 420); } catch (e) {}
+    }
+    function saveFailBanner(show, err) {
       var b = document.getElementById('odcSaveFailBanner');
-      if (!show) { if (b) b.style.display = 'none'; return; }
+      if (!show) { if (b) { b.style.display = 'none'; } window.__odcAlerted = false; document.body.classList.remove('odc-unsaved'); return; }
+      const auth = !!window.__odcAuthRequired || /AUTH_REQUIRED|401|InvalidAuthenticationToken|token/i.test(String(err && err.message || ''));
+      const since = window.__odcFirstFailAt ? Math.max(1, Math.round((Date.now() - window.__odcFirstFailAt) / 60000)) : 0;
       if (!b) {
         b = document.createElement('div');
         b.id = 'odcSaveFailBanner';
         b.className = 'no-print';
-        b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#a64b2a;color:#fff;padding:10px 16px;font-size:14px;font-weight:600;text-align:center;box-shadow:0 2px 8px rgba(0,0,0,.35)';
+        b.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:99999;background:#b3261e;color:#fff;padding:12px 16px;font-size:15px;font-weight:700;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,.4);animation:odcPulse 1.2s ease-in-out infinite';
+        const st = document.createElement('style'); st.textContent = '@keyframes odcPulse{0%,100%{background:#b3261e}50%{background:#e0442f}} body.odc-unsaved #cpStatusBar{border-color:#b3261e;box-shadow:0 0 0 2px #e0442f inset}';
+        document.head.appendChild(st);
         document.body.appendChild(b);
       }
-      b.textContent = '⚠ NOT SAVED to SharePoint — your changes are kept on this device and saving will retry automatically. Do NOT clear browser data. / 저장 실패 — 변경사항은 이 기기에 임시 보관되었고 자동으로 재시도합니다. 브라우저 데이터를 지우지 마세요.';
+      b.innerHTML = '⚠ <u>NOT SAVED</u> to SharePoint' + (since ? ' for ' + since + ' min' : '') + ' — ' +
+        (auth ? 'your Microsoft sign-in has expired. <b>Click "Sign in again"</b>, then saving resumes.' : 'retrying every 10 s. Do not close this tab or clear browser data.') +
+        ' <span style="font-weight:400;opacity:.9">/ 저장 안 됨' + (auth ? ' — 로그인이 만료됐습니다. <b>Sign in again</b>을 누르세요.' : ' — 자동 재시도 중. 탭을 닫지 마세요.') + '</span> ' +
+        (auth ? '<button type="button" id="odcSignInAgain" style="margin-left:10px;padding:5px 12px;border:0;border-radius:4px;background:#fff;color:#b3261e;font-weight:700;cursor:pointer">🔑 Sign in again</button>' : '') +
+        '<button type="button" id="odcRetrySave" style="margin-left:8px;padding:5px 12px;border:1px solid #fff;border-radius:4px;background:transparent;color:#fff;font-weight:700;cursor:pointer">↻ Retry now</button>';
       b.style.display = 'block';
+      document.body.classList.add('odc-unsaved');
+      const si = document.getElementById('odcSignInAgain');
+      if (si) si.addEventListener('click', async function () { si.disabled = true; si.textContent = 'Signing in…'; try { await ODC_CLOUD.getToken(); window.__odcAuthRequired = false; await window.odcFlushSave(); } catch (e) { alert('Sign-in did not complete: ' + (e.message || e)); } si.disabled = false; si.textContent = '🔑 Sign in again'; });
+      const rt = document.getElementById('odcRetrySave');
+      if (rt) rt.addEventListener('click', function () { rt.disabled = true; rt.textContent = 'Saving…'; window.odcFlushSave().then(function (ok) { rt.disabled = false; rt.textContent = ok ? '✓ Saved' : '↻ Retry now'; }); });
+      if (!window.__odcAlerted) {
+        window.__odcAlerted = true; beep();
+        setTimeout(function () { if (window.__odcLastSaveFailed) alert('⚠ Your changes are NOT being saved to SharePoint.\n\n' + (auth ? 'Your Microsoft sign-in has expired — click "Sign in again" on the red banner at the top, then your work will be saved.' : 'The app will keep retrying every 10 seconds. Do not close this tab until the red banner disappears.') + '\n\n저장이 안 되고 있습니다. 빨간 띠가 사라질 때까지 탭을 닫지 마세요.'); }, 300);
+      }
     }
+    setInterval(function () { if (window.__odcLastSaveFailed) { if (window.__odcAuthRequired) { /* keep banner fresh */ saveFailBanner(true, { message: 'AUTH_REQUIRED' }); } else saveFailBanner(true); } }, 60000);
 
     // Warn before closing the tab while a save is pending or has failed.
     window.addEventListener('beforeunload', function(e) {
-      if (window.__odcSavePending || window.__odcLastSaveFailed) {
+      if (window.__odcSavePending || window.__odcLastSaveFailed || window.__odcSaveRunning) {
         e.preventDefault();
-        e.returnValue = '';
+        e.returnValue = 'Changes are not saved to SharePoint yet.';
+        return e.returnValue;
       }
     });
 
@@ -8775,10 +8813,11 @@ if (_activeId && loadClient(_activeId) && state.mode) {
     };
 
     // Override autoSave — push current client to SharePoint (debounced 1.5s)
-    autoSave = function() {
-      window.__odcSavePending = true;
-      clearTimeout(saveTimer);
-      saveTimer = setTimeout(async function() {
+    // v3.5.2: the save itself is doSave(); autoSave() debounces it, odcFlushSave() runs it now
+    // and resolves true/false so "switch client" can refuse to drop unsaved work.
+    async function doSave() {
+      window.__odcSaveRunning = true;
+      try {
         try {
           const cache = ODC_CLOUD.clientCache;
           const _u = (ODC_CLOUD.getUser && ODC_CLOUD.getUser()) || {};
@@ -8826,14 +8865,18 @@ if (_activeId && loadClient(_activeId) && state.mode) {
           shadowWrite(activeClientId, true);
           window.__odcSavePending = false;
           window.__odcLastSaveFailed = false;
+          window.__odcFirstFailAt = 0;
           saveFailBanner(false);
 
           if (sEl) { sEl.textContent = 'Saved ' + new Date().toLocaleTimeString(); sEl.classList.add('saved'); }
+          window.__odcLastSavedAt = Date.now();
           updateClientChip();
+          return true;
         } catch (err) {
           console.error('Cloud save failed:', err);
           window.__odcLastSaveFailed = true;
-          saveFailBanner(true);
+          if (!window.__odcFirstFailAt) window.__odcFirstFailAt = Date.now();
+          saveFailBanner(true, err);
           const sEl = document.getElementById('saveStatus');
           if (sEl) {
             sEl.textContent = '⚠ Save failed (retrying…)';
@@ -8841,9 +8884,20 @@ if (_activeId && loadClient(_activeId) && state.mode) {
             sEl.title = err.message || String(err);
           }
           // REAL retry — keep trying every 10s until the save goes through.
-          setTimeout(function() { autoSave(); }, 10000);
+          clearTimeout(saveTimer); saveTimer = setTimeout(function() { autoSave(); }, 10000);
+          return false;
         }
-      }, 1500);
+      } finally { window.__odcSaveRunning = false; }
+    }
+    autoSave = function() {
+      window.__odcSavePending = true;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(function () { doSave(); }, 1500);
+    };
+    window.odcFlushSave = async function () {
+      clearTimeout(saveTimer);
+      if (!window.__odcSavePending && !window.__odcLastSaveFailed) return true;
+      return doSave();
     };
 
     // Override loadClient — read from cache
