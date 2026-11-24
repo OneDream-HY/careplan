@@ -18,8 +18,11 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.5.2 (24 Nov 2026)
+     APP VERSION: v3.5.3 (24 Nov 2026)
      Version history:
+       v3.5.3 — Care Plan status bar: "N DRAFT lines to review — show me" jumps to
+              and highlights the next DRAFT line (incl. auto-ticked boxes in
+              Preventative Health, which RNs were not finding).
        v3.5.2 — Save safety (QA report, 24 Nov): expired sign-in now re-
               authenticates in a POPUP (page and unsaved work stay) instead of
               a redirect; red "NOT SAVED" banner pulses, beeps, shows minutes
@@ -1337,7 +1340,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.5.2</span>
+    <span class="badge">Cloud · v3.5.3</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1918,7 +1921,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.5.2"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.5.3"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -7447,12 +7450,23 @@ window.ODC_APPROVAL = (function () {
     const n = remaining(); const approved = isApproved();
     const badge = approved ? '<span style="font-weight:700;color:#fff;background:#2f5d3a;border-radius:999px;padding:3px 10px">APPROVED v' + (d.__cp_version || 1) + ' · ' + dmy(d.__cp_approved_at) + (d.__cp_approved_by ? ' · ' + esc(d.__cp_approved_by) : '') + '</span>'
       : '<span style="font-weight:700;color:#6b4e00;background:#fff8e1;border:1px solid #d4a017;border-radius:999px;padding:3px 10px">DRAFT' + (d.__cp_version ? ' — revising v' + d.__cp_version : '') + '</span>';
-    const cnt = approved ? '' : (n ? '<span style="color:#9c2f2f">' + n + ' DRAFT line' + (n === 1 ? '' : 's') + ' to review</span>' : '<span style="color:#2f5d3a">All DRAFT lines reviewed</span>');
+    const cnt = approved ? '' : (n ? '<button type="button" id="cpShowDraft" title="Scroll to the next DRAFT line" style="color:#9c2f2f;background:#fff5f5;border:1px solid #e0a0a0;border-radius:999px;padding:3px 10px;font-weight:600;cursor:pointer">' + n + ' DRAFT line' + (n === 1 ? '' : 's') + ' to review — show me ↓</button>' : '<span style="color:#2f5d3a">All DRAFT lines reviewed</span>');
     const sig = d.cp_sig_rn ? '' : '<span style="color:#9c2f2f">RN signature missing</span>';
     bar.innerHTML = badge + cnt + (approved ? '' : sig) + '<span style="flex:1"></span>' +
       (approved ? '<button type="button" class="btn ghost" id="cpNewVersion">✎ Start new version</button><button type="button" class="btn ghost" id="cpReFile">⚡ File PDF again</button>'
         : '<button type="button" class="btn" id="cpApprove"' + (n || !d.cp_sig_rn ? ' disabled title="Review every DRAFT line and sign as RN first"' : '') + '>✅ Approve &amp; file</button>');
     const a = document.getElementById('cpApprove'); if (a) a.addEventListener('click', approve);
+    // v3.5.3 — jump to the next DRAFT line (RNs could not find the last 1–2, e.g. ticked boxes in Preventative Health)
+    const sd = document.getElementById('cpShowDraft'); if (sd) sd.addEventListener('click', function () {
+      const keys = draftKeysInDom(); let el = null;
+      if (keys.length) { window.__cpDraftIdx = ((window.__cpDraftIdx || 0) % keys.length); el = root().querySelector('[data-key="' + keys[window.__cpDraftIdx] + '"]'); window.__cpDraftIdx++; }
+      else if (autoRiskCount()) el = root().querySelector('[data-cpdomain="risk"]');
+      if (!el) return;
+      el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      const box = el.type === 'checkbox' ? (el.closest('label') || el) : el;
+      box.style.transition = 'box-shadow .2s'; box.style.boxShadow = '0 0 0 4px #ffb300'; setTimeout(function () { box.style.boxShadow = ''; }, 2500);
+      const tag = el.nextElementSibling; if (tag && tag.classList && tag.classList.contains('mac-draft-tag')) { tag.style.outline = '2px solid #ffb300'; setTimeout(function () { tag.style.outline = ''; }, 2500); }
+    });
     const aa = document.getElementById('cpAcceptAll'); if (aa) aa.addEventListener('click', function () { if (confirm('Mark all ' + n + ' remaining DRAFT lines as reviewed without opening them one by one?')) acceptAll(); });
     const nv = document.getElementById('cpNewVersion'); if (nv) nv.addEventListener('click', newVersion);
     const rf = document.getElementById('cpReFile'); if (rf) rf.addEventListener('click', function () { if (window.ODC_FILES_UI) ODC_FILES_UI.open(false); });
