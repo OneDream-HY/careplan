@@ -18,8 +18,13 @@
 <!-- ============================================================
      CLOUD VERSION — SharePoint backend via Microsoft Graph API
 
-     APP VERSION: v3.5.3 (24 Nov 2026)
+     APP VERSION: v3.5.4 (25 Nov 2026)
      Version history:
+       v3.5.4 — "Create the PDF and save it to the folder": a network/CORS failure
+              talking to the PDF service is now reported as a PDF-service problem
+              (it used to say "Could not reach SharePoint"). Server side: the
+              GitHub Pages origin was added to the Function App's platform CORS
+              allow-list, which is what had been blocking every browser call.
        v3.5.3 — Care Plan status bar: "N DRAFT lines to review — show me" jumps to
               and highlights the next DRAFT line (incl. auto-ticked boxes in
               Preventative Health, which RNs were not finding).
@@ -1340,7 +1345,7 @@ window.ODC_CLOUD = (function() {
 </style>
 <div id="cloudLoginOverlay">
   <div class="login-card">
-    <span class="badge">Cloud · v3.5.3</span>
+    <span class="badge">Cloud · v3.5.4</span>
     <h1>One Dream Community</h1>
     <p class="subtitle">Care Plan Workflow — sign in with your ODC Microsoft account to continue.</p>
     <button class="login-btn" id="cloudLoginBtn">Sign in with Microsoft 365</button>
@@ -1921,7 +1926,7 @@ const LOGO_DATA = "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAASABIAAD/4QBMRXhpZg
 document.getElementById('topLogo').src = LOGO_DATA;
 document.querySelectorAll('.print-header img').forEach(i => i.src = LOGO_DATA);
 
-const APP_VERSION = "v3.5.3"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
+const APP_VERSION = "v3.5.4"; // keep equal to the APP VERSION block + the two badges (forms carry no version)
 
 const DOCS = {"initial": {"title": "Initial Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "annual": {"title": "Annual Assessment & Planning", "ver": "v2.9", "date": "OCT 2026"}, "careplan": {"title": "Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "pain": {"title": "Pain Assessment", "ver": "v2.9", "date": "OCT 2026"}, "skin": {"title": "Skin Assessment (Waterlow)", "ver": "v2.9", "date": "OCT 2026"}, "wound": {"title": "Wound Assessment & Treatment Record", "ver": "v2.9", "date": "OCT 2026"}, "continence": {"title": "Continence & Toileting Assessment", "ver": "v2.9", "date": "OCT 2026"}, "mna": {"title": "Mini Nutritional Assessment (MST)", "ver": "v2.9", "date": "OCT 2026"}, "nutrition": {"title": "Nutrition Assessment", "ver": "v2.9", "date": "OCT 2026"}, "diabetes": {"title": "Diabetes Assessment", "ver": "v2.9", "date": "OCT 2026"}, "catheter": {"title": "Catheter Care Management & Care Plan", "ver": "v2.9", "date": "OCT 2026"}, "frat": {"title": "Falls Risk Screening Tool (FRAT)", "ver": "v2.9", "date": "OCT 2026"}, "mobility": {"title": "Mobility Assessment", "ver": "v2.9", "date": "OCT 2026"}, "behaviour": {"title": "Behaviour Assessment & Support Plan", "ver": "v2.9", "date": "OCT 2026"}, "medications": {"title": "Medications Management", "ver": "v2.9", "date": "OCT 2026"}, "hygiene": {"title": "Personal Hygiene Assessment", "ver": "v2.9", "date": "OCT 2026"}, "palliative": {"title": "Palliative Care Management", "ver": "v2.9", "date": "OCT 2026"}, "comprehensive": {"title": "Comprehensive Health/Medical Ax", "ver": "v2.9", "date": "OCT 2026"}, "communication": {"title": "Speech / Communication / Hearing / Vision Ax", "ver": "v2.9", "date": "OCT 2026"}};
 
@@ -9869,11 +9874,17 @@ window.ODC_SNAPSHOT = (function() {
   async function render(html, fileName) {
     const c = ODC_CLOUD_CONFIG.pdfService;
     const token = await ODC_CLOUD.getTokenFor([c.scope]);
-    const r = await fetch(c.url, {
-      method: 'POST',
-      headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ html: html, fileName: fileName || 'document.pdf' })
-    });
+    let r;
+    try {
+      r = await fetch(c.url, {
+        method: 'POST',
+        headers: { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ html: html, fileName: fileName || 'document.pdf' })
+      });
+    } catch (e) {
+      // Network/CORS failure talking to the PDF service — not a SharePoint problem.
+      throw new Error('Could not reach the PDF service (odc-pdf-service). Check the internet connection, or ask IT if the service is down. [' + String((e && e.message) || e) + ']');
+    }
     if (!r.ok) {
       let msg = 'PDF service error ' + r.status;
       try { const j = await r.json(); if (j && j.error) msg += ' — ' + j.error; } catch (e) {}
